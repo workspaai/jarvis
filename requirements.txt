@@ -1,5 +1,7 @@
 fastapi[standard]
 httpx
 openai
+pydantic
 python-dotenv
 streamlit
+uvicorn
