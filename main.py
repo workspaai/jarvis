@@ -4,6 +4,7 @@ Run:
   uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 """
 
+import os
 import time
 from pathlib import Path
 from typing import Literal
@@ -21,20 +22,62 @@ app = FastAPI(title="Week 1 v2 /ask Demo")
 _client: OpenAI | None = None
 
 ModelName = Literal["gpt-4o-mini", "gpt-4o", "o3-mini"]
-DEFAULT_MODEL: ModelName = "gpt-4o-mini"
 MODEL_PRICES_PER_1K: dict[str, tuple[float, float]] = {
     "gpt-4o": (0.0025, 0.01),
     "gpt-4o-mini": (0.00015, 0.0006),
     "o3-mini": (0.0011, 0.0044),
 }
 
+# Domyślny model ze zmiennej środowiskowej, żeby zmiana (np. na PC) nie wymagała
+# zmiany kodu; "or" łapie też pustą wartość skopiowaną z .env.example.
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL") or "gpt-4o-mini"
+if DEFAULT_MODEL not in MODEL_PRICES_PER_1K:
+    raise RuntimeError(
+        f"Nieznany DEFAULT_MODEL={DEFAULT_MODEL!r} — dozwolone: {sorted(MODEL_PRICES_PER_1K)}"
+    )
+
+SYSTEM_PROMPT = (
+    "Jesteś Jarvis — prywatny asystent Olka.\n"
+    "Zasady, których zawsze przestrzegasz:\n"
+    "1. Odpowiadasz po polsku.\n"
+    "2. Opierasz się wyłącznie na tym, co wiesz z pewnością.\n"
+    "3. Jeśli nie masz podstaw do rzetelnej odpowiedzi (np. pytanie dotyczy prywatnych "
+    "dokumentów, faktur czy spraw, do których nie masz dostępu), piszesz wprost, że nie "
+    "wiesz, i ustawiasz i_dont_know=true. Nigdy nie zmyślasz.\n"
+    "4. Odpowiadasz zwięźle — najlepiej w 1–3 zdaniach."
+)
+
 
 class Answer(BaseModel):
-    """The model output shape we want every caller to receive."""
+    """Kształt odpowiedzi, który za każdym razem dostaje klient endpointu."""
 
-    answer: str = Field(min_length=1)
-    confidence: float = Field(ge=0.0, le=1.0)
-    sources_needed: bool
+    answer: str = Field(
+        min_length=1,
+        description=(
+            "Zwięzła odpowiedź po polsku, najlepiej 1–3 zdania. Gdy nie masz podstaw "
+            "do rzetelnej odpowiedzi, napisz wprost „nie wiem” i jednym zdaniem dlaczego."
+        ),
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Jak bardzo jesteś pewny odpowiedzi: liczba od 0.0 (czyste zgadywanie) "
+            "do 1.0 (pełna pewność). Przy i_dont_know=true daj wartość bliską 0.0."
+        ),
+    )
+    sources_needed: bool = Field(
+        description=(
+            "true, gdy rzetelna odpowiedź wymagałaby zajrzenia do zewnętrznych źródeł "
+            "lub dokumentów, których nie masz w tej rozmowie; inaczej false."
+        )
+    )
+    i_dont_know: bool = Field(
+        description=(
+            "true, gdy nie masz podstaw do rzetelnej odpowiedzi i uczciwie to przyznajesz "
+            "zamiast zmyślać; false, gdy odpowiadasz merytorycznie."
+        )
+    )
 
 
 class AskRequest(BaseModel):
@@ -92,7 +135,11 @@ def usage_counts(completion) -> tuple[int, int, int]:
 def call_structured_model(question: str, model: ModelName) -> tuple[Answer, int, int, int]:
     completion = get_client().chat.completions.parse(
         model=model,
-        messages=[{"role": "user", "content": question}],
+        # Kolejność celowa (prompt caching): stała część pierwsza, zmienna ostatnia.
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+        ],
         response_format=Answer,
     )
 
