@@ -1,5 +1,9 @@
+chromadb
 fastapi[standard]
 httpx
+langchain
+langchain-community
+langchain-openai
 openai
 pydantic
 python-dotenv

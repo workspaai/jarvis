@@ -11,6 +11,9 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 
@@ -35,6 +38,51 @@ if DEFAULT_MODEL not in MODEL_PRICES_PER_1K:
     raise RuntimeError(
         f"Nieznany DEFAULT_MODEL={DEFAULT_MODEL!r} — dozwolone: {sorted(MODEL_PRICES_PER_1K)}"
     )
+
+# --- Week 2: RAG — cała konfiguracja przez env, zero zaszytych wartości ---
+CHROMA_DIR = os.getenv("CHROMA_DIR") or str(THIS_DIR / "chroma_db")
+# TEN SAM model embeddingów przy ingest i przy zapytaniach (W2 L1: zablokuj wcześnie;
+# zmiana modelu = re-embedding całego korpusu).
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "text-embedding-3-small"
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE") or 800)
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP") or 100)
+TOP_K = int(os.getenv("TOP_K") or 5)
+COLLECTION_NAME = "jarvis_docs"
+
+_embeddings: OpenAIEmbeddings | None = None
+_vector_store: Chroma | None = None
+
+
+def get_embeddings() -> OpenAIEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        _embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    return _embeddings
+
+
+def get_vector_store() -> Chroma:
+    """Leniwa inicjalizacja Chromy + sprawdzenie, że baza faktycznie odpowiada.
+
+    Gdy baza jest nieosiągalna (np. brak uprawnień do katalogu), klient dostaje
+    czytelny błąd 503 zamiast tajemniczego tracebacku.
+    """
+    global _vector_store
+    if _vector_store is None:
+        try:
+            store = Chroma(
+                collection_name=COLLECTION_NAME,
+                embedding_function=get_embeddings(),
+                persist_directory=CHROMA_DIR,
+            )
+            store._collection.count()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Baza wektorowa (Chroma, katalog {CHROMA_DIR}) nieosiągalna: {exc}",
+            ) from exc
+        _vector_store = store
+    return _vector_store
+
 
 SYSTEM_PROMPT = (
     "Jesteś Jarvis — prywatny asystent Olka.\n"
@@ -84,6 +132,18 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1)
     model: ModelName | None = None
     force_bad: bool = False
+
+
+class IngestRequest(BaseModel):
+    text: str
+    document_id: str
+    source: str = ""
+
+
+class IngestResponse(BaseModel):
+    document_id: str
+    chunks_indexed: int
+    status: str
 
 
 class AttemptResult(BaseModel):
@@ -171,6 +231,59 @@ def call_malformed_json_once(question: str, model: ModelName) -> tuple[str, int,
     raw = completion.choices[0].message.content or ""
     total_tokens, prompt_tokens, completion_tokens = usage_counts(completion)
     return raw, total_tokens, prompt_tokens, completion_tokens
+
+
+@app.post("/ingest")
+def ingest(body: IngestRequest) -> IngestResponse:
+    text = body.text.strip()
+    document_id = body.document_id.strip()
+    if not text:
+        raise HTTPException(
+            status_code=400, detail="Pole 'text' jest puste — nie ma czego indeksować."
+        )
+    if not document_id:
+        raise HTTPException(
+            status_code=400, detail="Pole 'document_id' jest puste — podaj identyfikator dokumentu."
+        )
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    chunks = splitter.split_text(text)
+    if not chunks:
+        raise HTTPException(
+            status_code=400, detail="Po pocięciu tekstu nie powstał żaden chunk."
+        )
+
+    store = get_vector_store()
+    # Re-ingest dokumentu = nadpisanie: usuwamy stare chunki, żeby krótsza wersja
+    # dokumentu nie zostawiła w bazie osieroconych końcówek.
+    store._collection.delete(where={"document_id": document_id})
+
+    ids = [f"{document_id}::{i}" for i in range(len(chunks))]
+    # Wzorzec z W2 L8 — tekst EMBEDOWANY ≠ tekst POKAZYWANY: embedujemy chunk
+    # wzbogacony o nagłówek z document_id (lepszy retrieval), a czysty oryginał
+    # do cytowania trzymamy w metadanych (display_text). prev_id/next_id wskazują
+    # sąsiadów pod przyszłe "retrieve narrow, generate wide".
+    embed_texts = [f"[{document_id}] {chunk}" for chunk in chunks]
+    metadatas = [
+        {
+            "document_id": document_id,
+            "chunk_index": i,
+            "source": body.source.strip(),
+            "display_text": chunk,
+            "prev_id": ids[i - 1] if i > 0 else "",
+            "next_id": ids[i + 1] if i < len(chunks) - 1 else "",
+        }
+        for i, chunk in enumerate(chunks)
+    ]
+    store.add_texts(texts=embed_texts, metadatas=metadatas, ids=ids)
+
+    return IngestResponse(
+        document_id=document_id, chunks_indexed=len(chunks), status="ok"
+    )
 
 
 @app.post("/ask")

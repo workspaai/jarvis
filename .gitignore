@@ -1,6 +1,9 @@
 # Environment - never commit real keys
 .env
 
+# Vector database - lokalna baza nigdy do repo
+chroma_db/
+
 # Python
 __pycache__/
 *.py[cod]
