@@ -87,15 +87,23 @@ def get_vector_store() -> Chroma:
     return _vector_store
 
 
+# Week 2: prompt z Week 1 rozszerzony o zasady RAG (grounding). Odmowa jest decyzją
+# MODELU na podstawie TREŚCI kontekstu, nie progiem score'u — wniosek z Kroku 3 test e:
+# score pułapki (0.4399) był wyższy niż niektórych trafnych odpowiedzi (0.3224).
 SYSTEM_PROMPT = (
     "Jesteś Jarvis — prywatny asystent Olka.\n"
     "Zasady, których zawsze przestrzegasz:\n"
-    "1. Odpowiadasz po polsku.\n"
-    "2. Opierasz się wyłącznie na tym, co wiesz z pewnością.\n"
-    "3. Jeśli nie masz podstaw do rzetelnej odpowiedzi (np. pytanie dotyczy prywatnych "
-    "dokumentów, faktur czy spraw, do których nie masz dostępu), piszesz wprost, że nie "
-    "wiesz, i ustawiasz i_dont_know=true. Nigdy nie zmyślasz.\n"
-    "4. Odpowiadasz zwięźle — najlepiej w 1–3 zdaniach."
+    "1. Odpowiadasz po polsku — ZAWSZE, także wtedy, gdy fragmenty dokumentów są po "
+    "angielsku; dosłowne cytaty i identyfikatory źródeł zostawiasz w oryginale.\n"
+    "2. Odpowiadasz WYŁĄCZNIE na podstawie fragmentów dokumentów podanych w sekcji "
+    "KONTEKST — nie korzystasz z żadnej wiedzy spoza nich.\n"
+    "3. Jeśli fragmenty w sekcji KONTEKST nie zawierają odpowiedzi na pytanie, piszesz "
+    "wprost, że nie ma tego w dokumentach, ustawiasz i_dont_know=true i zostawiasz "
+    "source puste. Uwaga: fragment podobny tematycznie do pytania NIE jest odpowiedzią "
+    "— liczy się treść, nie podobieństwo. Nigdy nie zmyślasz.\n"
+    "4. W polu source zawsze podajesz document_id tych fragmentów, z których faktycznie "
+    "skorzystałeś w odpowiedzi.\n"
+    "5. Odpowiadasz zwięźle — najlepiej w 1–3 zdaniach."
 )
 
 
@@ -127,6 +135,13 @@ class Answer(BaseModel):
         description=(
             "true, gdy nie masz podstaw do rzetelnej odpowiedzi i uczciwie to przyznajesz "
             "zamiast zmyślać; false, gdy odpowiadasz merytorycznie."
+        )
+    )
+    source: list[str] = Field(
+        description=(
+            "Lista document_id fragmentów z sekcji KONTEKST faktycznie użytych w "
+            "odpowiedzi (np. [\"POL-101\"]). Pusta lista przy odmowie (i_dont_know=true) "
+            "albo gdy żaden fragment nie był potrzebny."
         )
     )
 
@@ -180,6 +195,9 @@ class AskResponse(BaseModel):
     latency_ms: int
     cost_usd: float
     attempts: list[AttemptResult]
+    # Week 2 (wymóg zadania): ID chunków pobranych z bazy dla tego pytania —
+    # to, co model DOSTAŁ w kontekście; answer.source mówi, czego faktycznie UŻYŁ.
+    retrieved_chunks: list[str]
 
 
 @app.get("/health")
@@ -210,13 +228,41 @@ def usage_counts(completion) -> tuple[int, int, int]:
     return usage.total_tokens, usage.prompt_tokens, usage.completion_tokens
 
 
-def call_structured_model(question: str, model: ModelName) -> tuple[Answer, int, int, int]:
+def retrieve_context(question: str) -> tuple[str, list[str]]:
+    """Pobiera TOP_K chunków i skleja kontekst dla modelu.
+
+    Do kontekstu idzie display_text (CZYSTY tekst z metadanych, nie wersja embedowana
+    z nagłówkiem), a każdy fragment jest oznaczony swoim document_id — model musi
+    wiedzieć, co cytuje w polu source.
+    """
+    results = get_vector_store().similarity_search_with_relevance_scores(
+        question, k=TOP_K
+    )
+    fragments = []
+    chunk_ids = []
+    for doc, _score in results:
+        document_id = doc.metadata["document_id"]
+        chunk_ids.append(f"{document_id}::{doc.metadata['chunk_index']}")
+        fragments.append(
+            f"[document_id: {document_id}]\n{doc.metadata['display_text']}"
+        )
+    return "\n\n".join(fragments), chunk_ids
+
+
+def build_user_message(question: str, context: str) -> str:
+    # Kontekst przed pytaniem: pytanie (najbardziej zmienna część) na samym końcu.
+    return f"KONTEKST:\n{context}\n\nPYTANIE: {question}"
+
+
+def call_structured_model(
+    question: str, model: ModelName, context: str
+) -> tuple[Answer, int, int, int]:
     completion = get_client().chat.completions.parse(
         model=model,
         # Kolejność celowa (prompt caching): stała część pierwsza, zmienna ostatnia.
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": question},
+            {"role": "user", "content": build_user_message(question, context)},
         ],
         response_format=Answer,
     )
@@ -340,6 +386,9 @@ def ask(body: AskRequest) -> AskResponse:
     total_completion_tokens = 0
     start = time.perf_counter()
 
+    # Week 2: retrieval RAZ, przed pętlą prób — obie próby dostają ten sam kontekst.
+    context, retrieved_chunks = retrieve_context(body.question)
+
     for attempt in range(2):
         try:
             if body.force_bad and attempt == 0:
@@ -377,7 +426,7 @@ def ask(body: AskRequest) -> AskResponse:
                 )
             else:
                 answer, tokens_used, prompt_tokens, completion_tokens = call_structured_model(
-                    body.question, model
+                    body.question, model, context
                 )
                 total_tokens_used += tokens_used
                 total_prompt_tokens += prompt_tokens
@@ -402,6 +451,7 @@ def ask(body: AskRequest) -> AskResponse:
                 latency_ms=latency_ms,
                 cost_usd=round(cost_usd, 6),
                 attempts=attempts,
+                retrieved_chunks=retrieved_chunks,
             )
         except (ValidationError, ValueError) as exc:
             last_error = str(exc)
