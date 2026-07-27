@@ -73,6 +73,9 @@ def get_vector_store() -> Chroma:
                 collection_name=COLLECTION_NAME,
                 embedding_function=get_embeddings(),
                 persist_directory=CHROMA_DIR,
+                # Jawnie cosine (domyślne w Chromie jest L2): score w /debug/retrieve
+                # = 1 - odległość cosinusowa, czyli skala znana z sesji (1 = identyczne).
+                collection_metadata={"hnsw:space": "cosine"},
             )
             store._collection.count()
         except Exception as exc:
@@ -144,6 +147,21 @@ class IngestResponse(BaseModel):
     document_id: str
     chunks_indexed: int
     status: str
+
+
+class RetrieveHit(BaseModel):
+    document_id: str
+    chunk_index: int
+    score: float
+    display_text: str
+    prev_id: str
+    next_id: str
+
+
+class RetrieveResponse(BaseModel):
+    query: str
+    k: int
+    hits: list[RetrieveHit]
 
 
 class AttemptResult(BaseModel):
@@ -284,6 +302,32 @@ def ingest(body: IngestRequest) -> IngestResponse:
     return IngestResponse(
         document_id=document_id, chunks_indexed=len(chunks), status="ok"
     )
+
+
+@app.get("/debug/retrieve")
+def debug_retrieve(q: str, k: int | None = None) -> RetrieveResponse:
+    """Sam retrieval, ZERO wywołań LLM — do testowania wyszukiwania przed generacją.
+
+    („Test retrieval BEFORE you wire the LLM" — przewodnik Week 2.)
+    """
+    query = q.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Parametr 'q' jest pusty — podaj pytanie.")
+    top_k = k if k and k > 0 else TOP_K
+
+    results = get_vector_store().similarity_search_with_relevance_scores(query, k=top_k)
+    hits = [
+        RetrieveHit(
+            document_id=doc.metadata["document_id"],
+            chunk_index=doc.metadata["chunk_index"],
+            score=round(score, 4),
+            display_text=doc.metadata["display_text"],
+            prev_id=doc.metadata["prev_id"],
+            next_id=doc.metadata["next_id"],
+        )
+        for doc, score in results
+    ]
+    return RetrieveResponse(query=query, k=top_k, hits=hits)
 
 
 @app.post("/ask")
