@@ -35,7 +35,7 @@ def call_json(method: str, url: str, payload: dict | None = None) -> tuple[int, 
         if method == "POST":
             response = httpx.post(url, json=payload, timeout=120.0)
         else:
-            response = httpx.get(url, timeout=5.0)
+            response = httpx.get(url, timeout=120.0)
 
         try:
             return response.status_code, response.json()
