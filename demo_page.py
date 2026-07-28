@@ -1,4 +1,7 @@
-"""Minimal Streamlit UI for the Week 1 v2 `/ask` demo.
+"""Streamlit UI dla API Jarvisa: /ask (RAG z cytowaniami, Week 2) + /ingest.
+
+UI tylko woła API — cała logika RAG (chunking, retrieval, grounding) mieszka
+w FastAPI. Zero sekretów po stronie strony: adres API z paska bocznego.
 
 Run:
   streamlit run demo_page.py
@@ -9,7 +12,7 @@ import json
 import httpx
 import streamlit as st
 
-WORKDIR_CMD = "ai-engineering-bootcamp-v2/week-1v2"
+WORKDIR_CMD = "projekty/jarvis"
 MODELS = ["gpt-4o-mini", "gpt-4o", "o3-mini"]
 
 
@@ -75,11 +78,28 @@ def render_response_summary(data: dict | str) -> None:
 
     answer = data.get("answer")
     if isinstance(answer, dict):
-        st.markdown("### Answer")
-        st.write(answer.get("answer", ""))
+        st.markdown("### Odpowiedź")
+        if answer.get("i_dont_know"):
+            # Odmowa ma być czytelna od razu, nie ukryta w polu boolean.
+            st.warning(f"**Brak w dokumentach** — {answer.get('answer', '')}")
+        else:
+            st.success(answer.get("answer", ""))
+
+        source = answer.get("source") or []
+        if source:
+            st.markdown("**Źródła (cytowane):** " + " ".join(f"`{s}`" for s in source))
+        else:
+            st.markdown("**Źródła (cytowane):** _brak — odpowiedź nie cytuje żadnego dokumentu_")
         st.caption(
             f"confidence: {answer.get('confidence')} | "
-            f"sources_needed: {answer.get('sources_needed')}"
+            f"sources_needed: {answer.get('sources_needed')} | "
+            f"i_dont_know: {answer.get('i_dont_know')}"
+        )
+
+    retrieved = data.get("retrieved_chunks") or []
+    if retrieved:
+        st.markdown(
+            "**Pobrane chunki (retrieval):** " + " ".join(f"`{c}`" for c in retrieved)
         )
 
     metric_cols = st.columns(4)
@@ -89,13 +109,14 @@ def render_response_summary(data: dict | str) -> None:
     metric_cols[3].metric("Cost", f"${data.get('cost_usd', '-')}")
 
 
-st.set_page_config(page_title="Week 1 v2 /ask Demo", layout="centered")
-st.title("Week 1 v2: Minimal `/ask` Demo")
+st.set_page_config(page_title="Jarvis — demo RAG (Week 2)", layout="centered")
+st.title("Jarvis: pytania do dokumentów (RAG)")
 st.caption(
-    "One final demo endpoint. The separate `stages/` files show how this grows step by step."
+    "Streamlit tylko woła API — cała logika RAG (chunking, retrieval, grounding) "
+    "mieszka w FastAPI. Pliki `stages/` pokazują, jak endpoint rósł krok po kroku."
 )
 
-base_url = st.sidebar.text_input("API base URL", "http://127.0.0.1:8000")
+base_url = st.sidebar.text_input("API base URL", "https://jarvis-8lpg.onrender.com")
 st.sidebar.markdown("### Start the API")
 st.sidebar.code(
     f"cd {WORKDIR_CMD}\n"
@@ -109,37 +130,67 @@ st.sidebar.code(
     language="bash",
 )
 
-with st.form("ask_form"):
-    question = st.text_area(
-        "Question",
-        "What is Retrieval-Augmented Generation in one sentence?",
-        height=100,
-    )
-    model = st.selectbox("Model", MODELS, index=0)
-    force_bad = st.checkbox(
-        "Force a bad first response to demo validation + retry",
-        value=False,
-    )
-    submitted = st.form_submit_button("Ask", type="primary")
+if st.sidebar.button("Sprawdź /health"):
+    status, data = call_json("GET", f"{base_url.rstrip('/')}/health")
+    st.sidebar.markdown(f"**HTTP {status}**" if status else "**Brak połączenia**")
+    st.sidebar.json(data)
 
-payload = build_payload(question, model, force_bad)
+tab_ask, tab_ingest = st.tabs(["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)"])
 
-st.markdown("### Request")
-st.code(render_curl(base_url, payload), language="bash")
+with tab_ask:
+    with st.form("ask_form"):
+        question = st.text_area(
+            "Pytanie",
+            "How many remote days are allowed?",
+            height=100,
+        )
+        model = st.selectbox("Model", MODELS, index=0)
+        force_bad = st.checkbox(
+            "Wymuś zepsutą pierwszą odpowiedź (demo walidacji + retry z Week 1)",
+            value=False,
+        )
+        submitted = st.form_submit_button("Zapytaj", type="primary")
 
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("Check API health"):
-        status, data = call_json("GET", f"{base_url.rstrip('/')}/health")
-        st.markdown(f"**HTTP {status}**" if status else "**Not connected**")
+    payload = build_payload(question, model, force_bad)
+    st.markdown("#### Request")
+    st.code(render_curl(base_url, payload), language="bash")
+
+    if submitted:
+        with st.spinner("Wołam /ask… (uśpiony Render może się budzić do ~1 min)"):
+            status, data = call_json("POST", f"{base_url.rstrip('/')}/ask", payload)
+        st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
+        render_response_summary(data)
+        render_attempts(data)
+        with st.expander("Pełny JSON odpowiedzi"):
+            st.json(data)
+
+with tab_ingest:
+    with st.form("ingest_form"):
+        doc_text = st.text_area(
+            "Treść dokumentu",
+            height=220,
+            placeholder="Wklej pełny tekst dokumentu do zaindeksowania…",
+        )
+        document_id = st.text_input("document_id", placeholder="np. POL-101")
+        doc_source = st.text_input(
+            "source (opcjonalne)", placeholder="np. doc1_handbook.txt"
+        )
+        ingest_submitted = st.form_submit_button("Zaindeksuj", type="primary")
+
+    if ingest_submitted:
+        ingest_payload = {
+            "text": doc_text,
+            "document_id": document_id,
+            "source": doc_source,
+        }
+        with st.spinner("Wołam /ingest…"):
+            status, data = call_json(
+                "POST", f"{base_url.rstrip('/')}/ingest", ingest_payload
+            )
+        st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
+        if status == 200 and isinstance(data, dict):
+            st.success(
+                f"Zaindeksowano **{data.get('document_id')}** → "
+                f"{data.get('chunks_indexed')} chunk(ów), status: {data.get('status')}"
+            )
         st.json(data)
-
-if submitted:
-    with st.spinner("Calling /ask..."):
-        status, data = call_json("POST", f"{base_url.rstrip('/')}/ask", payload)
-    st.markdown("### Response")
-    st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
-    render_response_summary(data)
-    render_attempts(data)
-    st.markdown("### Raw JSON")
-    st.json(data)
