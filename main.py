@@ -257,6 +257,9 @@ def build_user_message(question: str, context: str) -> str:
 def call_structured_model(
     question: str, model: ModelName, context: str
 ) -> tuple[Answer, int, int, int]:
+    # temperature=0 → powtarzalne odpowiedzi (kluczowe przy golden secie i porównaniach
+    # konfiguracji); modele rozumujące (o3-*) nie przyjmują tego parametru.
+    extra = {} if model.startswith("o3") else {"temperature": 0}
     completion = get_client().chat.completions.parse(
         model=model,
         # Kolejność celowa (prompt caching): stała część pierwsza, zmienna ostatnia.
@@ -265,6 +268,7 @@ def call_structured_model(
             {"role": "user", "content": build_user_message(question, context)},
         ],
         response_format=Answer,
+        **extra,
     )
 
     parsed = completion.choices[0].message.parsed
