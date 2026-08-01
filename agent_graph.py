@@ -21,6 +21,7 @@ Uruchomienie:
 import operator
 import sys
 import time
+import uuid
 from typing import Annotated, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -168,8 +169,17 @@ def get_graph():
     return _graph
 
 
-def run_agent(question: str, thread_id: str = "demo") -> dict:
-    """Uruchamia graf na jednym pytaniu; log i statystyki jak w surowej pętli."""
+def run_agent(question: str, thread_id: str | None = None) -> dict:
+    """Uruchamia graf na jednym pytaniu; log i statystyki jak w surowej pętli.
+
+    `thread_id` domyślnie NOWY dla każdego przebiegu. Checkpointer zapisuje stan
+    per wątek, a pola `messages` i `trace` mają reducer `operator.add` — użycie
+    tego samego wątku dwa razy DOKLEJAŁO stan poprzedniego pytania (podwójny
+    ślad, zawyżone tokeny, zanieczyszczona odpowiedź). Stały `thread_id`
+    podajemy tylko świadomie: do kontynuacji rozmowy albo wznowienia po HITL.
+    """
+    if thread_id is None:
+        thread_id = f"run-{uuid.uuid4().hex[:8]}"
     started = time.time()
     print(f"\n{'=' * 72}\nPRZEBIEG AGENTA (LangGraph) — pytanie: {question}\n{'=' * 72}")
 

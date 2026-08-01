@@ -212,13 +212,6 @@ with tab_agent:
         "korzysta z tej samej bazy wektorowej co /ask. UI nie zawiera logiki agenta."
     )
 
-    engine_label = st.radio(
-        "Silnik pętli",
-        ["Surowa pętla (agent_raw)", "LangGraph StateGraph (agent_graph)"],
-        horizontal=True,
-        help="Ta sama logika, dwie maszynerie — dowód z Kroku 3 dziennika budowy.",
-    )
-
     st.markdown("**Pytania demonstracyjne** (kliknij, żeby wypełnić pole):")
     demo_cols = st.columns(3)
     if demo_cols[0].button("Praca z domu na stałe?", use_container_width=True):
@@ -232,12 +225,21 @@ with tab_agent:
     if st.button("Pułapka: parental leave (brak w dokumentach)"):
         st.session_state["agent_question"] = "What is the parental leave policy?"
 
-    agent_question = st.text_area(
-        "Pytanie do agenta",
-        key="agent_question",
-        height=80,
-    )
-    run_clicked = st.button("Uruchom agenta", type="primary")
+    # Formularz: przełącznik silnika i pytanie NIE wywołują przeładowania strony
+    # (Streamlit przy każdym rerunie wracał do pierwszej zakładki — psuło demo).
+    with st.form("agent_form"):
+        agent_question = st.text_area(
+            "Pytanie do agenta",
+            key="agent_question",
+            height=80,
+        )
+        engine_label = st.radio(
+            "Silnik pętli",
+            ["Surowa pętla (agent_raw)", "LangGraph StateGraph (agent_graph)"],
+            horizontal=True,
+            help="Ta sama logika, dwie maszynerie — dowód z Kroku 3 dziennika budowy.",
+        )
+        run_clicked = st.form_submit_button("Uruchom agenta", type="primary")
 
     if run_clicked:
         if not (agent_question or "").strip():
@@ -254,7 +256,9 @@ with tab_agent:
                 from agent_graph import run_agent as run_agent_fn
 
                 engine_name = "LangGraph StateGraph (agent_graph.py)"
-                kwargs = {"thread_id": "streamlit"}
+                # Bez stałego thread_id: każde pytanie ma dostać świeży stan
+                # (checkpointer + reducery dokleiłyby poprzedni przebieg).
+                kwargs = {}
 
             with st.spinner(f"Agent pracuje — {engine_name}…"):
                 try:
