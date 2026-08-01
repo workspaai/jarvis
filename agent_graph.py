@@ -32,6 +32,8 @@ from agent_raw import (
     MAX_ITERATIONS,
     SEARCH_TOOL,
     _observe_summary,
+    log_step,
+    parse_sources,
     search_documents,
 )
 from main import DEFAULT_MODEL, compute_cost_usd, get_client, usage_counts
@@ -41,6 +43,7 @@ class AgentState(TypedDict):
     """STATE: obiekt wędrujący po krawędziach; każdy węzeł czyta i aktualizuje."""
 
     messages: Annotated[list, operator.add]  # reducer: nowe wiadomości dopisywane
+    trace: Annotated[list, operator.add]  # ślad Think/Act/Observe dla UI
     iterations: int
     tool_calls: int
     prompt_tokens: int
@@ -60,15 +63,17 @@ def think(state: AgentState) -> dict:
     _, prompt_tokens, completion_tokens = usage_counts(completion)
     msg = completion.choices[0].message
 
+    step: list[dict] = []
     if msg.tool_calls:
-        print(f"[iter {iteration}] THINK   -> model zdecydował: wywołać narzędzie")
+        log_step(step, iteration, "THINK", "model zdecydował: wywołać narzędzie")
         answer = ""
     else:
-        print(f"[iter {iteration}] THINK   -> model zdecydował: ODPOWIEDŹ KOŃCOWA")
+        log_step(step, iteration, "THINK", "model zdecydował: ODPOWIEDŹ KOŃCOWA")
         answer = (msg.content or "").strip()
 
     return {
         "messages": [msg],
+        "trace": step,
         "iterations": iteration,
         "prompt_tokens": state["prompt_tokens"] + prompt_tokens,
         "completion_tokens": state["completion_tokens"] + completion_tokens,
@@ -81,36 +86,48 @@ def act(state: AgentState) -> dict:
     last = state["messages"][-1]
     iteration = state["iterations"]
     new_messages = []
+    step: list[dict] = []
     executed = 0
 
     for tc in last.tool_calls:
         if tc.function.name != "search_documents":
             result = f"BŁĄD: nieznane narzędzie '{tc.function.name}'."
-            print(f"[iter {iteration}] ACT     -> ODRZUCONE: {tc.function.name}")
+            log_step(step, iteration, "ACT", f"ODRZUCONE: {tc.function.name}")
         else:
             import json
 
             args = json.loads(tc.function.arguments)
             query = args.get("query", "")
             executed += 1
-            print(f'[iter {iteration}] ACT     -> search_documents(query="{query}")')
+            log_step(step, iteration, "ACT", f'search_documents(query="{query}")')
             result = search_documents(query)
-        print(f"[iter {iteration}] OBSERVE <- {_observe_summary(result)}")
+        log_step(step, iteration, "OBSERVE", _observe_summary(result))
         new_messages.append(
             {"role": "tool", "tool_call_id": tc.id, "content": result}
         )
 
-    return {"messages": new_messages, "tool_calls": state["tool_calls"] + executed}
+    return {
+        "messages": new_messages,
+        "trace": step,
+        "tool_calls": state["tool_calls"] + executed,
+    }
 
 
 def fail_closed(state: AgentState) -> dict:
     """Limit iteracji przekroczony — uczciwa odmowa zamiast zmyślonej odpowiedzi."""
-    print(f"[STOP] FAIL CLOSED -> przekroczony limit {MAX_ITERATIONS} iteracji")
+    step: list[dict] = []
+    log_step(
+        step,
+        state["iterations"],
+        "STOP",
+        f"FAIL CLOSED — przekroczony limit {MAX_ITERATIONS} iteracji",
+    )
     return {
+        "trace": step,
         "answer": (
             "Nie wiem — agent przekroczył limit iteracji "
             f"({MAX_ITERATIONS}) i przerywam zamiast zgadywać. Źródła: [brak]."
-        )
+        ),
     }
 
 
@@ -162,6 +179,7 @@ def run_agent(question: str, thread_id: str = "demo") -> dict:
                 {"role": "system", "content": AGENT_SYSTEM_PROMPT},
                 {"role": "user", "content": question},
             ],
+            "trace": [],
             "iterations": 0,
             "tool_calls": 0,
             "prompt_tokens": 0,
@@ -175,17 +193,24 @@ def run_agent(question: str, thread_id: str = "demo") -> dict:
         DEFAULT_MODEL, final["prompt_tokens"], final["completion_tokens"]
     )
     tokens = final["prompt_tokens"] + final["completion_tokens"]
+    elapsed_ms = int((time.time() - started) * 1000)
     print(f"\nODPOWIEDŹ: {final['answer']}")
     print(
         f"-- statystyki: iteracje={final['iterations']}, "
         f"wywołania narzędzia={final['tool_calls']}, tokeny={tokens}, "
-        f"koszt=${cost:.6f}, czas={time.time() - started:.1f}s"
+        f"koszt=${cost:.6f}, czas={elapsed_ms / 1000:.1f}s"
     )
+    sources, refused = parse_sources(final["answer"])
     return {
         "answer": final["answer"],
         "iterations": final["iterations"],
         "tool_calls": final["tool_calls"],
         "cost_usd": cost,
+        "tokens": tokens,
+        "latency_ms": elapsed_ms,
+        "sources": sources,
+        "refused": refused,
+        "trace": final["trace"],
     }
 
 

@@ -105,6 +105,29 @@ def search_documents(query: str) -> str:
     return "<dokumenty>\n" + "\n\n".join(fragments) + "\n</dokumenty>"
 
 
+def log_step(trace: list, iteration: int, kind: str, text: str) -> None:
+    """Loguje krok pętli JEDNOCZEŚNIE na konsolę i do strukturalnego śladu.
+
+    Ślad (`trace`) jest zwracany z `run_agent`, żeby UI mogło pokazać przebieg
+    bez własnej logiki — Streamlit tylko wyświetla to, co policzył agent.
+    """
+    arrow = "<-" if kind == "OBSERVE" else "->"
+    print(f"[iter {iteration}] {kind:<7} {arrow} {text}")
+    trace.append({"iteration": iteration, "kind": kind, "text": text})
+
+
+def parse_sources(answer: str) -> tuple[list[str], bool]:
+    """Wyciąga z odpowiedzi cytowane document_id i informację, czy agent odmówił."""
+    import re
+
+    match = re.search(r"Źródła:\s*\[([^\]]*)\]", answer)
+    raw = match.group(1).strip() if match else ""
+    if not raw or raw.lower() in {"brak", "none", "-"}:
+        return [], True
+    sources = [s.strip() for s in raw.split(",") if s.strip()]
+    return sources, not sources
+
+
 def _observe_summary(result: str) -> str:
     """Skrót obserwacji do logu: które dokumenty i score'y, ile znaków."""
     import re
@@ -123,6 +146,7 @@ def run_agent(question: str, model: str = DEFAULT_MODEL) -> dict:
         {"role": "user", "content": question},
     ]
     total_prompt = total_completion = tool_calls_count = 0
+    trace: list[dict] = []
 
     print(f"\n{'=' * 72}\nPRZEBIEG AGENTA — pytanie: {question}\n{'=' * 72}")
 
@@ -139,21 +163,23 @@ def run_agent(question: str, model: str = DEFAULT_MODEL) -> dict:
         msg = completion.choices[0].message
 
         if msg.tool_calls:
-            print(f"[iter {iteration}] THINK   -> model zdecydował: wywołać narzędzie")
+            log_step(trace, iteration, "THINK", "model zdecydował: wywołać narzędzie")
             # Wywołania (może być kilka) wykonuje MÓJ kod — "the model does not
             # run code, you do" (W3 L1). Wynik/błąd wraca jako obserwacja.
             messages.append(msg)
             for tc in msg.tool_calls:
                 if tc.function.name != "search_documents":
                     result = f"BŁĄD: nieznane narzędzie '{tc.function.name}'."
-                    print(f"[iter {iteration}] ACT     -> ODRZUCONE: {tc.function.name}")
+                    log_step(trace, iteration, "ACT", f"ODRZUCONE: {tc.function.name}")
                 else:
                     args = json.loads(tc.function.arguments)
                     query = args.get("query", "")
                     tool_calls_count += 1
-                    print(f'[iter {iteration}] ACT     -> search_documents(query="{query}")')
+                    log_step(
+                        trace, iteration, "ACT", f'search_documents(query="{query}")'
+                    )
                     result = search_documents(query)
-                print(f"[iter {iteration}] OBSERVE <- {_observe_summary(result)}")
+                log_step(trace, iteration, "OBSERVE", _observe_summary(result))
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": result}
                 )
@@ -162,27 +188,40 @@ def run_agent(question: str, model: str = DEFAULT_MODEL) -> dict:
         # STOP: tekst bez wywołań narzędzi = odpowiedź końcowa
         final = (msg.content or "").strip()
         cost = compute_cost_usd(model, total_prompt, total_completion)
-        print(f"[iter {iteration}] THINK   -> model zdecydował: ODPOWIEDŹ KOŃCOWA")
+        log_step(trace, iteration, "THINK", "model zdecydował: ODPOWIEDŹ KOŃCOWA")
+        elapsed_ms = int((time.time() - started) * 1000)
         print(f"\nODPOWIEDŹ: {final}")
         print(
             f"-- statystyki: iteracje={iteration}, wywołania narzędzia={tool_calls_count}, "
             f"tokeny={total_prompt + total_completion}, koszt=${cost:.6f}, "
-            f"czas={time.time() - started:.1f}s"
+            f"czas={elapsed_ms / 1000:.1f}s"
         )
+        sources, refused = parse_sources(final)
         return {
             "answer": final,
             "iterations": iteration,
             "tool_calls": tool_calls_count,
             "cost_usd": cost,
+            "tokens": total_prompt + total_completion,
+            "latency_ms": elapsed_ms,
+            "sources": sources,
+            "refused": refused,
+            "trace": trace,
         }
 
     # Fail closed (W3 L1): limit przekroczony -> uczciwa odmowa, nie zmyślona odpowiedź.
     cost = compute_cost_usd(model, total_prompt, total_completion)
     final = (
-        "Nie wiem — agent przekroczył limit iteracji (6) i przerywam zamiast "
-        "zgadywać. Źródła: [brak]."
+        f"Nie wiem — agent przekroczył limit iteracji ({MAX_ITERATIONS}) i "
+        "przerywam zamiast zgadywać. Źródła: [brak]."
     )
-    print(f"[STOP] FAIL CLOSED -> przekroczony limit {MAX_ITERATIONS} iteracji")
+    log_step(
+        trace,
+        MAX_ITERATIONS,
+        "STOP",
+        f"FAIL CLOSED — przekroczony limit {MAX_ITERATIONS} iteracji",
+    )
+    elapsed_ms = int((time.time() - started) * 1000)
     print(f"\nODPOWIEDŹ: {final}")
     print(
         f"-- statystyki: iteracje={MAX_ITERATIONS}, wywołania narzędzia={tool_calls_count}, "
@@ -193,6 +232,11 @@ def run_agent(question: str, model: str = DEFAULT_MODEL) -> dict:
         "iterations": MAX_ITERATIONS,
         "tool_calls": tool_calls_count,
         "cost_usd": cost,
+        "tokens": total_prompt + total_completion,
+        "latency_ms": elapsed_ms,
+        "sources": [],
+        "refused": True,
+        "trace": trace,
     }
 
 

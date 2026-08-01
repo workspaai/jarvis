@@ -1,7 +1,11 @@
-"""Streamlit UI dla API Jarvisa: /ask (RAG z cytowaniami, Week 2) + /ingest.
+"""Streamlit UI dla Jarvisa: /ask (RAG, Week 2), /ingest oraz AGENT (Week 3).
 
-UI tylko woła API — cała logika RAG (chunking, retrieval, grounding) mieszka
-w FastAPI. Zero sekretów po stronie strony: adres API z paska bocznego.
+UI tylko woła API albo kod agenta — cała logika (RAG, pętla Think/Act/Observe)
+mieszka w FastAPI i modułach `agent_raw` / `agent_graph`. Zero sekretów po
+stronie strony: adres API z paska bocznego.
+
+Uwaga: zakładka Agent uruchamia agenta LOKALNIE (import modułu), bo agent nie
+jest wystawiony na Renderze — zadanie Week 3 wymaga zrzutu/klipu UI, nie URL-a.
 
 Run:
   streamlit run demo_page.py
@@ -135,7 +139,9 @@ if st.sidebar.button("Sprawdź /health"):
     st.sidebar.markdown(f"**HTTP {status}**" if status else "**Brak połączenia**")
     st.sidebar.json(data)
 
-tab_ask, tab_ingest = st.tabs(["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)"])
+tab_ask, tab_ingest, tab_agent = st.tabs(
+    ["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)", "Agent (Week 3)"]
+)
 
 with tab_ask:
     with st.form("ask_form"):
@@ -194,3 +200,113 @@ with tab_ingest:
                 f"{data.get('chunks_indexed')} chunk(ów), status: {data.get('status')}"
             )
         st.json(data)
+
+with tab_agent:
+    st.markdown(
+        "Agent **planuje → woła narzędzie → ocenia wynik → decyduje ponownie**. "
+        "Drugie wyszukiwanie następuje TYLKO wtedy, gdy pierwsze nie odpowiedziało "
+        "na pytanie — dlatego to agent, a nie sztywny workflow."
+    )
+    st.caption(
+        "Agent działa lokalnie (import modułu `agent_raw` / `agent_graph`), "
+        "korzysta z tej samej bazy wektorowej co /ask. UI nie zawiera logiki agenta."
+    )
+
+    engine_label = st.radio(
+        "Silnik pętli",
+        ["Surowa pętla (agent_raw)", "LangGraph StateGraph (agent_graph)"],
+        horizontal=True,
+        help="Ta sama logika, dwie maszynerie — dowód z Kroku 3 dziennika budowy.",
+    )
+
+    st.markdown("**Pytania demonstracyjne** (kliknij, żeby wypełnić pole):")
+    demo_cols = st.columns(3)
+    if demo_cols[0].button("Praca z domu na stałe?", use_container_width=True):
+        st.session_state["agent_question"] = "Czy mogę pracować z domu na stałe?"
+    if demo_cols[1].button("How many remote days? (EN)", use_container_width=True):
+        st.session_state["agent_question"] = "How many remote days are allowed?"
+    if demo_cols[2].button("Paragon — co dalej?", use_container_width=True):
+        st.session_state["agent_question"] = (
+            "Co się stanie, jeśli nie dostarczę paragonu?"
+        )
+    if st.button("Pułapka: parental leave (brak w dokumentach)"):
+        st.session_state["agent_question"] = "What is the parental leave policy?"
+
+    agent_question = st.text_area(
+        "Pytanie do agenta",
+        key="agent_question",
+        height=80,
+    )
+    run_clicked = st.button("Uruchom agenta", type="primary")
+
+    if run_clicked:
+        if not (agent_question or "").strip():
+            st.warning("Wpisz pytanie albo wybierz jedno z przykładowych.")
+        else:
+            # Import w środku: Streamlit ma wystartować także wtedy, gdy ktoś
+            # używa tylko zakładek /ask i /ingest (np. bez klucza OpenAI).
+            if engine_label.startswith("Surowa"):
+                from agent_raw import run_agent as run_agent_fn
+
+                engine_name = "surowa pętla (agent_raw.py)"
+                kwargs = {}
+            else:
+                from agent_graph import run_agent as run_agent_fn
+
+                engine_name = "LangGraph StateGraph (agent_graph.py)"
+                kwargs = {"thread_id": "streamlit"}
+
+            with st.spinner(f"Agent pracuje — {engine_name}…"):
+                try:
+                    result = run_agent_fn(agent_question, **kwargs)
+                except Exception as exc:  # błąd pokazujemy, nie chowamy
+                    st.error(f"Agent nie dokończył pracy: {exc}")
+                    result = None
+
+            if result:
+                st.markdown("### Odpowiedź agenta")
+                if result["refused"]:
+                    st.warning(f"**Uczciwa odmowa** — {result['answer']}")
+                else:
+                    st.success(result["answer"])
+
+                if result["sources"]:
+                    st.markdown(
+                        "**Źródła (cytowane):** "
+                        + " ".join(f"`{s}`" for s in result["sources"])
+                    )
+                else:
+                    st.markdown(
+                        "**Źródła (cytowane):** _brak — agent nie znalazł podstaw_"
+                    )
+
+                st.markdown("### Ślad pętli agenta (Think → Act → Observe)")
+                st.caption(
+                    "ACT pokazuje, JAKIEJ FRAZY agent szukał w danym kroku — "
+                    "przy nieudanym wyszukiwaniu sam ją przeformułowuje."
+                )
+                current_iteration = None
+                for step in result["trace"]:
+                    if step["iteration"] != current_iteration:
+                        current_iteration = step["iteration"]
+                        st.markdown(f"**— iteracja {current_iteration} —**")
+                    icon = {
+                        "THINK": "🧠 THINK",
+                        "ACT": "🔧 ACT",
+                        "OBSERVE": "👁 OBSERVE",
+                        "STOP": "🛑 STOP",
+                    }.get(step["kind"], step["kind"])
+                    st.markdown(f"- {icon} — `{step['text']}`")
+
+                st.markdown("### Metryki przebiegu")
+                # Cztery kolumny, a koszt w podpisie: przy pięciu kolumnach
+                # Streamlit ucinał wartość do "$0.00…".
+                agent_cols = st.columns(4)
+                agent_cols[0].metric("Iteracje", result["iterations"])
+                agent_cols[1].metric("Wywołania narzędzia", result["tool_calls"])
+                agent_cols[2].metric("Tokeny", result["tokens"])
+                agent_cols[3].metric("Czas", f"{result['latency_ms']} ms")
+                st.caption(
+                    f"Koszt przebiegu: **${result['cost_usd']:.6f}** · "
+                    f"silnik: {engine_name} · limit iteracji: 6 (fail closed)"
+                )
