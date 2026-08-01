@@ -267,50 +267,59 @@ with tab_agent:
                     st.error(f"Agent nie dokończył pracy: {exc}")
                     result = None
 
+            # Wynik do session_state: Streamlit przeładowuje skrypt przy KAŻDEJ
+            # zmianie rozmiaru okna albo powiększenia, a sekcja renderowana tylko
+            # pod `run_clicked` znikała wtedy z ekranu (psuło robienie zrzutów).
             if result:
-                st.markdown("### Odpowiedź agenta")
-                if result["refused"]:
-                    st.warning(f"**Uczciwa odmowa** — {result['answer']}")
-                else:
-                    st.success(result["answer"])
+                st.session_state["agent_result"] = result
+                st.session_state["agent_engine"] = engine_name
 
-                if result["sources"]:
-                    st.markdown(
-                        "**Źródła (cytowane):** "
-                        + " ".join(f"`{s}`" for s in result["sources"])
-                    )
-                else:
-                    st.markdown(
-                        "**Źródła (cytowane):** _brak — agent nie znalazł podstaw_"
-                    )
+    result = st.session_state.get("agent_result")
+    engine_name = st.session_state.get("agent_engine", "")
+    if result:
+        st.markdown("### Odpowiedź agenta")
+        if result["refused"]:
+            st.warning(f"**Uczciwa odmowa** — {result['answer']}")
+        else:
+            st.success(result["answer"])
 
-                st.markdown("### Ślad pętli agenta (Think → Act → Observe)")
-                st.caption(
-                    "ACT pokazuje, JAKIEJ FRAZY agent szukał w danym kroku — "
-                    "przy nieudanym wyszukiwaniu sam ją przeformułowuje."
-                )
-                current_iteration = None
-                for step in result["trace"]:
-                    if step["iteration"] != current_iteration:
-                        current_iteration = step["iteration"]
-                        st.markdown(f"**— iteracja {current_iteration} —**")
-                    icon = {
-                        "THINK": "🧠 THINK",
-                        "ACT": "🔧 ACT",
-                        "OBSERVE": "👁 OBSERVE",
-                        "STOP": "🛑 STOP",
-                    }.get(step["kind"], step["kind"])
-                    st.markdown(f"- {icon} — `{step['text']}`")
+        if result["sources"]:
+            st.markdown(
+                "**Źródła (cytowane):** "
+                + " ".join(f"`{s}`" for s in result["sources"])
+            )
+        else:
+            st.markdown(
+                "**Źródła (cytowane):** _brak — agent nie znalazł podstaw_"
+            )
 
-                st.markdown("### Metryki przebiegu")
-                # Cztery kolumny, a koszt w podpisie: przy pięciu kolumnach
-                # Streamlit ucinał wartość do "$0.00…".
-                agent_cols = st.columns(4)
-                agent_cols[0].metric("Iteracje", result["iterations"])
-                agent_cols[1].metric("Wywołania narzędzia", result["tool_calls"])
-                agent_cols[2].metric("Tokeny", result["tokens"])
-                agent_cols[3].metric("Czas", f"{result['latency_ms']} ms")
-                st.caption(
-                    f"Koszt przebiegu: **${result['cost_usd']:.6f}** · "
-                    f"silnik: {engine_name} · limit iteracji: 6 (fail closed)"
-                )
+        st.markdown("### Ślad pętli agenta (Think → Act → Observe)")
+        st.caption(
+            "ACT pokazuje, JAKIEJ FRAZY agent szukał w danym kroku — "
+            "przy nieudanym wyszukiwaniu sam ją przeformułowuje."
+        )
+        current_iteration = None
+        for step in result["trace"]:
+            if step["iteration"] != current_iteration:
+                current_iteration = step["iteration"]
+                st.markdown(f"**— iteracja {current_iteration} —**")
+            icon = {
+                "THINK": "🧠 THINK",
+                "ACT": "🔧 ACT",
+                "OBSERVE": "👁 OBSERVE",
+                "STOP": "🛑 STOP",
+            }.get(step["kind"], step["kind"])
+            st.markdown(f"- {icon} — `{step['text']}`")
+
+        st.markdown("### Metryki przebiegu")
+        # Cztery kolumny, a koszt w podpisie: przy pięciu kolumnach
+        # Streamlit ucinał wartość do "$0.00…".
+        agent_cols = st.columns(4)
+        agent_cols[0].metric("Iteracje", result["iterations"])
+        agent_cols[1].metric("Wywołania narzędzia", result["tool_calls"])
+        agent_cols[2].metric("Tokeny", result["tokens"])
+        agent_cols[3].metric("Czas", f"{result['latency_ms']} ms")
+        st.caption(
+            f"Koszt przebiegu: **${result['cost_usd']:.6f}** · "
+            f"silnik: {engine_name} · limit iteracji: 6 (fail closed)"
+        )
