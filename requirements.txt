@@ -4,6 +4,7 @@ httpx
 langchain
 langchain-community
 langchain-openai
+langgraph
 openai
 pydantic
 python-dotenv
