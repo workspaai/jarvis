@@ -31,6 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from agent_raw import (
     AGENT_SYSTEM_PROMPT,
     MAX_ITERATIONS,
+    PROMPT_VERSION,
     SEARCH_TOOL,
     _observe_summary,
     log_step,
@@ -38,6 +39,7 @@ from agent_raw import (
     search_documents,
 )
 from main import DEFAULT_MODEL, compute_cost_usd, get_client, usage_counts
+from tracing import save_agent_trace
 
 
 class AgentState(TypedDict):
@@ -45,6 +47,7 @@ class AgentState(TypedDict):
 
     messages: Annotated[list, operator.add]  # reducer: nowe wiadomości dopisywane
     trace: Annotated[list, operator.add]  # ślad Think/Act/Observe dla UI
+    tool_log: Annotated[list, operator.add]  # Week 4: pełne wywołania narzędzia do trace'u
     iterations: int
     tool_calls: int
     prompt_tokens: int
@@ -88,12 +91,21 @@ def act(state: AgentState) -> dict:
     iteration = state["iterations"]
     new_messages = []
     step: list[dict] = []
+    tools: list[dict] = []
     executed = 0
 
     for tc in last.tool_calls:
         if tc.function.name != "search_documents":
             result = f"BŁĄD: nieznane narzędzie '{tc.function.name}'."
             log_step(step, iteration, "ACT", f"ODRZUCONE: {tc.function.name}")
+            tools.append(
+                {
+                    "iteration": iteration,
+                    "tool": tc.function.name,
+                    "arguments": tc.function.arguments,
+                    "result": result,
+                }
+            )
         else:
             import json
 
@@ -102,6 +114,14 @@ def act(state: AgentState) -> dict:
             executed += 1
             log_step(step, iteration, "ACT", f'search_documents(query="{query}")')
             result = search_documents(query)
+            tools.append(
+                {
+                    "iteration": iteration,
+                    "tool": "search_documents",
+                    "arguments": {"query": query},
+                    "result": result,
+                }
+            )
         log_step(step, iteration, "OBSERVE", _observe_summary(result))
         new_messages.append(
             {"role": "tool", "tool_call_id": tc.id, "content": result}
@@ -110,6 +130,7 @@ def act(state: AgentState) -> dict:
     return {
         "messages": new_messages,
         "trace": step,
+        "tool_log": tools,
         "tool_calls": state["tool_calls"] + executed,
     }
 
@@ -190,6 +211,7 @@ def run_agent(question: str, thread_id: str | None = None) -> dict:
                 {"role": "user", "content": question},
             ],
             "trace": [],
+            "tool_log": [],
             "iterations": 0,
             "tool_calls": 0,
             "prompt_tokens": 0,
@@ -211,7 +233,7 @@ def run_agent(question: str, thread_id: str | None = None) -> dict:
         f"koszt=${cost:.6f}, czas={elapsed_ms / 1000:.1f}s"
     )
     sources, refused = parse_sources(final["answer"])
-    return {
+    result_dict = {
         "answer": final["answer"],
         "iterations": final["iterations"],
         "tool_calls": final["tool_calls"],
@@ -222,6 +244,10 @@ def run_agent(question: str, thread_id: str | None = None) -> dict:
         "refused": refused,
         "trace": final["trace"],
     }
+    save_agent_trace(
+        "agent_graph", question, DEFAULT_MODEL, PROMPT_VERSION, result_dict, final["tool_log"]
+    )
+    return result_dict
 
 
 if __name__ == "__main__":

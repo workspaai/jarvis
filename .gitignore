@@ -4,6 +4,9 @@
 # Vector database - lokalna baza nigdy do repo
 chroma_db/
 
+# Week 4: trace'y przebiegów zawierają TREŚĆ dokumentów korpusu - nigdy do repo
+traces/
+
 # Python
 __pycache__/
 *.py[cod]
