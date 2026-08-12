@@ -12,6 +12,7 @@ Run:
 """
 
 import json
+from pathlib import Path
 
 import httpx
 import streamlit as st
@@ -139,8 +140,8 @@ if st.sidebar.button("Sprawdź /health"):
     st.sidebar.markdown(f"**HTTP {status}**" if status else "**Brak połączenia**")
     st.sidebar.json(data)
 
-tab_ask, tab_ingest, tab_agent = st.tabs(
-    ["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)", "Agent (Week 3)"]
+tab_ask, tab_ingest, tab_agent, tab_evals = st.tabs(
+    ["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)", "Agent (Week 3)", "Evale (Week 4)"]
 )
 
 with tab_ask:
@@ -322,4 +323,78 @@ with tab_agent:
         st.caption(
             f"Koszt przebiegu: **${result['cost_usd']:.6f}** · "
             f"silnik: {engine_name} · limit iteracji: 6 (fail closed)"
+        )
+
+with tab_evals:
+    st.markdown(
+        "Zestaw **asercji kodowych** (Codify z pętli TRACE): zero wywołań LLM — "
+        "czyta zapisane trace'y z `traces/traces.jsonl` i ocenia **najnowszy** "
+        "przebieg każdego z 20 pytań. Każda asercja jest powiązana z kategorią "
+        "z taksonomii awarii zbudowanej przy open codingu."
+    )
+    st.caption(
+        "TRACE w praktyce: Trace (zapis przebiegów) → Read/Analyze (open coding "
+        "i taksonomia) → Codify (te asercje) → Enforce (ten przycisk; raporty "
+        "przed/po w evals/)."
+    )
+
+    if st.button("Uruchom zestaw evali", type="primary", key="run_evals_btn"):
+        # Import w środku — zakładki /ask i /ingest mają działać także bez
+        # wygenerowanych trace'ów (np. świeży klon repo).
+        from evals.run_evals import build_report
+
+        with st.spinner("Liczę asercje na najnowszych trace'ach…"):
+            try:
+                st.session_state["eval_report"] = build_report()
+            except Exception as exc:  # brak pliku trace'ów itp. — pokazujemy wprost
+                st.error(f"Nie udało się policzyć evali: {exc}")
+
+    eval_report = st.session_state.get("eval_report")
+    if eval_report:
+        summary = eval_report["summary"]
+        baseline = None
+        baseline_path = Path(__file__).resolve().parent / "evals" / "report_baseline.json"
+        if baseline_path.exists():
+            baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+        st.markdown("### Wynik zestawu")
+        delta = None
+        if baseline:
+            delta_pp = (summary["pass_rate"] - baseline["summary"]["pass_rate"]) * 100
+            delta = f"{delta_pp:+.1f} pp vs baseline"
+        eval_cols = st.columns(3)
+        eval_cols[0].metric("PASS RATE", f"{summary['pass_rate']:.1%}", delta)
+        eval_cols[1].metric(
+            "Asercje zaliczone", f"{summary['checks_passed']}/{summary['checks_total']}"
+        )
+        eval_cols[2].metric("Pytań ocenionych", summary["questions"])
+
+        st.markdown("### Per asercja — baseline (PRZED) vs teraz (PO)")
+        table_rows = []
+        for name in sorted(eval_report["per_assertion"]):
+            now = eval_report["per_assertion"][name]
+            row = {"asercja": name}
+            if baseline and name in baseline["per_assertion"]:
+                b = baseline["per_assertion"][name]
+                row["baseline"] = f"{b['pass']}/{b['total']}"
+            row["teraz"] = f"{now['pass']}/{now['total']}"
+            if baseline and name in baseline["per_assertion"]:
+                row["zmiana"] = now["pass"] - baseline["per_assertion"][name]["pass"]
+            table_rows.append(row)
+        st.dataframe(table_rows, width="stretch", hide_index=True)
+
+        if eval_report["failures"]:
+            st.markdown("### Porażki (werdykt binarny + powód jednym zdaniem)")
+            for failure in eval_report["failures"]:
+                st.warning(
+                    f"**{failure['qid']}** · {failure['engine']} · "
+                    f"`{failure['assertion']}` — {failure['reason']}"
+                )
+        else:
+            st.success("Zero porażek.")
+
+        st.caption(
+            "Baseline = stan sprzed poprawek promptu (evals/report_baseline.json). "
+            "Known-fail: q12 — fałszywa odmowa przy pytaniu wymagającym wnioskowania "
+            "(3 nieudane iteracje promptowe; kandydat na mocniejszy model w tej roli)."
         )

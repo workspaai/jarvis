@@ -131,11 +131,8 @@ def check_row(qid: str, row: dict) -> list[dict]:
     return results
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--out", help="zapisz raport JSON do pliku")
-    args = parser.parse_args()
-
+def build_report() -> dict:
+    """Buduje pełny raport evali (bez printów) — używane przez CLI i Streamlit."""
     with TRACES_PATH.open(encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
 
@@ -169,8 +166,19 @@ def main() -> int:
         "questions": len(latest), "checks_total": total, "checks_passed": passed,
         "pass_rate": round(passed / total, 4) if total else None,
     }
+    return report
 
-    print(f"Pytań ocenionych: {len(latest)} | asercji: {total} | pass: {passed} "
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", help="zapisz raport JSON do pliku")
+    args = parser.parse_args()
+
+    report = build_report()
+    total = report["summary"]["checks_total"]
+    passed = report["summary"]["checks_passed"]
+
+    print(f"Pytań ocenionych: {report['summary']['questions']} | asercji: {total} | pass: {passed} "
           f"| PASS RATE: {report['summary']['pass_rate']:.1%}")
     print("\nPer asercja:")
     for name in sorted(report["per_assertion"]):
