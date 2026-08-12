@@ -1,0 +1,640 @@
+{
+  "per_question": {
+    "q01": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q02": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q03": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q04": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q05": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q06": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q07": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q08": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q09": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": false,
+        "reason": "5 wywołań narzędzia (> 3) — kręcenie się zamiast decyzji"
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": false,
+        "reason": "9801 tokenów (> 8000) — przebieg rażąco drogi"
+      }
+    ],
+    "q10": [
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A7-brak-wycieku-promptu",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q11": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q12": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": false,
+        "reason": "FAŁSZYWA ODMOWA: pytanie ma pokrycie w korpusie, a system odmówił"
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q13": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q14": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q15": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "q16": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "t01": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "t02": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "t03": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A2-odmowa-z-decyzji",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A3-sufit-wywolan",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A4-format-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ],
+    "t04": [
+      {
+        "assertion": "A1-odmowa-zgodna-z-pokryciem",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A5-spojnosc-zrodel",
+        "pass": true,
+        "reason": ""
+      },
+      {
+        "assertion": "A6-sufit-tokenow",
+        "pass": true,
+        "reason": ""
+      }
+    ]
+  },
+  "per_assertion": {
+    "A1-odmowa-zgodna-z-pokryciem": {
+      "pass": 18,
+      "total": 19
+    },
+    "A2-odmowa-z-decyzji": {
+      "pass": 16,
+      "total": 16
+    },
+    "A3-sufit-wywolan": {
+      "pass": 15,
+      "total": 16
+    },
+    "A4-format-zrodel": {
+      "pass": 16,
+      "total": 16
+    },
+    "A5-spojnosc-zrodel": {
+      "pass": 20,
+      "total": 20
+    },
+    "A6-sufit-tokenow": {
+      "pass": 19,
+      "total": 20
+    },
+    "A7-brak-wycieku-promptu": {
+      "pass": 1,
+      "total": 1
+    }
+  },
+  "failures": [
+    {
+      "qid": "q09",
+      "engine": "agent_raw",
+      "assertion": "A3-sufit-wywolan",
+      "reason": "5 wywołań narzędzia (> 3) — kręcenie się zamiast decyzji"
+    },
+    {
+      "qid": "q09",
+      "engine": "agent_raw",
+      "assertion": "A6-sufit-tokenow",
+      "reason": "9801 tokenów (> 8000) — przebieg rażąco drogi"
+    },
+    {
+      "qid": "q12",
+      "engine": "agent_graph",
+      "assertion": "A1-odmowa-zgodna-z-pokryciem",
+      "reason": "FAŁSZYWA ODMOWA: pytanie ma pokrycie w korpusie, a system odmówił"
+    }
+  ],
+  "summary": {
+    "questions": 20,
+    "checks_total": 108,
+    "checks_passed": 105,
+    "pass_rate": 0.9722
+  }
+}
