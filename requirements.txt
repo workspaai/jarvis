@@ -6,6 +6,8 @@ langchain-community
 langchain-openai
 langgraph
 openai
+psycopg[binary]
+pgvector
 pydantic
 python-dotenv
 streamlit

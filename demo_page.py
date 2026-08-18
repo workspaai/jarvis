@@ -140,8 +140,14 @@ if st.sidebar.button("Sprawdź /health"):
     st.sidebar.markdown(f"**HTTP {status}**" if status else "**Brak połączenia**")
     st.sidebar.json(data)
 
-tab_ask, tab_ingest, tab_agent, tab_evals = st.tabs(
-    ["Zadaj pytanie (/ask)", "Dodaj dokument (/ingest)", "Agent (Week 3)", "Evale (Week 4)"]
+tab_ask, tab_ingest, tab_agent, tab_evals, tab_memory = st.tabs(
+    [
+        "Zadaj pytanie (/ask)",
+        "Dodaj dokument (/ingest)",
+        "Agent (Week 3)",
+        "Evale (Week 4)",
+        "Pamięć (Week 5)",
+    ]
 )
 
 with tab_ask:
@@ -398,3 +404,104 @@ with tab_evals:
             "Known-fail: q12 — fałszywa odmowa przy pytaniu wymagającym wnioskowania "
             "(3 nieudane iteracje promptowe; kandydat na mocniejszy model w tej roli)."
         )
+
+with tab_memory:
+    st.markdown(
+        "**Pamięć długoterminowa Jarvisa (Week 5).** Fakty żyją w ZEWNĘTRZNEJ bazie "
+        "(Neon Postgres + pgvector), więc **przeżywają restart procesu i nową sesję** — "
+        "to NIE historia czatu, tylko trwały store. Zapis przechodzi przez BRAMKĘ "
+        "(reguły + mały model decydują, czy to trwały fakt); odczyt jest hybrydowy "
+        "(podobieństwo znaczeniowe + świeżość)."
+    )
+
+    st.markdown("### 1) Zapisz preferencję / fakt")
+    with st.form("mem_save_form"):
+        save_text = st.text_input(
+            "Powiedz Jarvisowi coś do zapamiętania",
+            placeholder="np. Zapisz, że rozliczam projekty w EUR",
+        )
+        save_clicked = st.form_submit_button("Zapisz do pamięci", type="primary")
+
+    if save_clicked:
+        if not (save_text or "").strip():
+            st.warning("Wpisz coś do zapamiętania.")
+        else:
+            with st.spinner("Bramka zapisu ocenia turę…"):
+                try:
+                    # Import w środku — zakładki /ask i /ingest mają działać także bez
+                    # skonfigurowanej bazy (DATABASE_URL) czy klucza OpenAI.
+                    from write_gate import maybe_write_memory
+
+                    saved = maybe_write_memory(save_text, source_event_id="streamlit-demo")
+                    if saved:
+                        st.success(
+                            f"✅ Zapisano trwale: **{saved['fact']}**  ·  "
+                            f"_(temat: {saved['subject']})_"
+                        )
+                    else:
+                        st.info(
+                            "Bramka NIE zapisała — to nie był trwały fakt/preferencja "
+                            "(np. pytanie albo treść przejściowa). Tak ma działać: "
+                            "store zostaje mały i trafny."
+                        )
+                except Exception as exc:  # błąd pokazujemy wprost, nie chowamy
+                    st.error(f"Błąd zapisu: {exc}")
+
+    st.divider()
+
+    st.markdown("### 2) Odczyt w NOWEJ sesji")
+    st.caption(
+        "Odczyt idzie PROSTO do bazy Neon — nie z pamięci tej sesji. Dowód recall między "
+        "sesjami: otwórz ten URL w nowej karcie / oknie incognito i kliknij tylko odczyt "
+        "— fakt nadal wróci, bez powtarzania go."
+    )
+    with st.form("mem_recall_form"):
+        recall_text = st.text_input(
+            "Zapytaj o coś, co Jarvis mógł zapamiętać",
+            placeholder="np. w czym rozliczam projekty?",
+        )
+        recall_clicked = st.form_submit_button("Odczytaj z pamięci", type="primary")
+
+    if recall_clicked:
+        if not (recall_text or "").strip():
+            st.warning("Wpisz pytanie.")
+        else:
+            with st.spinner("Szukam w pamięci (podobieństwo + świeżość)…"):
+                try:
+                    from memory_store import recall_facts
+
+                    hits = recall_facts(recall_text, limit=3)
+                    if hits:
+                        st.markdown("**Jarvis pamięta:**")
+                        for h in hits:
+                            st.success(
+                                f"🧠 {h[2]}  ·  _(temat: {h[1]}, trafność {h[4]:.2f})_"
+                            )
+                    else:
+                        st.info("Nic nie znalazłem w pamięci dla tego pytania.")
+                except Exception as exc:
+                    st.error(f"Błąd odczytu: {exc}")
+
+    with st.expander("Podgląd całego trwałego store'u (co przetrwało między sesjami)"):
+        try:
+            from memory_store import get_facts
+
+            all_facts = get_facts()
+            if all_facts:
+                st.dataframe(
+                    [
+                        {
+                            "id": f[0],
+                            "temat": f[1],
+                            "fakt": f[2],
+                            "zapisano": str(f[4])[:19],
+                        }
+                        for f in all_facts
+                    ],
+                    hide_index=True,
+                    width="stretch",
+                )
+            else:
+                st.caption("Store jest pusty — zapisz pierwszy fakt powyżej.")
+        except Exception as exc:
+            st.error(f"Nie udało się odczytać store'u: {exc}")
