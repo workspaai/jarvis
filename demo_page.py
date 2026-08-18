@@ -114,6 +114,63 @@ def render_response_summary(data: dict | str) -> None:
     metric_cols[3].metric("Cost", f"${data.get('cost_usd', '-')}")
 
 
+def render_eval_report(eval_report: dict, saved: bool) -> None:
+    """Rysuje raport evali; wołający musi łapać wyjątki (patrz zakładka Evale)."""
+    summary = eval_report["summary"]
+    baseline = None
+    baseline_path = Path(__file__).resolve().parent / "evals" / "report_baseline.json"
+    if baseline_path.exists():
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    st.markdown("### Wynik zestawu")
+    if saved:
+        st.info(
+            "Na tej instancji nie ma kompletu trace'ów (katalog `traces/` nie "
+            "wchodzi do repo) — to ZAPISANY wynik ostatniego pełnego przebiegu "
+            "lokalnego (`evals/report_after_fix3.json`), nie świeże liczenie."
+        )
+    delta = None
+    if baseline:
+        delta_pp = (summary["pass_rate"] - baseline["summary"]["pass_rate"]) * 100
+        delta = f"{delta_pp:+.1f} pp vs baseline"
+    eval_cols = st.columns(3)
+    eval_cols[0].metric("PASS RATE", f"{summary['pass_rate']:.1%}", delta)
+    eval_cols[1].metric(
+        "Asercje zaliczone", f"{summary['checks_passed']}/{summary['checks_total']}"
+    )
+    eval_cols[2].metric("Pytań ocenionych", summary["questions"])
+
+    st.markdown("### Per asercja — baseline (PRZED) vs teraz (PO)")
+    table_rows = []
+    for name in sorted(eval_report["per_assertion"]):
+        now = eval_report["per_assertion"][name]
+        row = {"asercja": name}
+        if baseline and name in baseline["per_assertion"]:
+            b = baseline["per_assertion"][name]
+            row["baseline"] = f"{b['pass']}/{b['total']}"
+        row["teraz"] = f"{now['pass']}/{now['total']}"
+        if baseline and name in baseline["per_assertion"]:
+            row["zmiana"] = now["pass"] - baseline["per_assertion"][name]["pass"]
+        table_rows.append(row)
+    st.dataframe(table_rows, width="stretch", hide_index=True)
+
+    if eval_report["failures"]:
+        st.markdown("### Porażki (werdykt binarny + powód jednym zdaniem)")
+        for failure in eval_report["failures"]:
+            st.warning(
+                f"**{failure['qid']}** · {failure['engine']} · "
+                f"`{failure['assertion']}` — {failure['reason']}"
+            )
+    else:
+        st.success("Zero porażek.")
+
+    st.caption(
+        "Baseline = stan sprzed poprawek promptu (evals/report_baseline.json). "
+        "Known-fail: q12 — fałszywa odmowa przy pytaniu wymagającym wnioskowania "
+        "(3 nieudane iteracje promptowe; kandydat na mocniejszy model w tej roli)."
+    )
+
+
 st.set_page_config(page_title="Jarvis — demo RAG (Week 2)", layout="centered")
 st.title("Jarvis: pytania do dokumentów (RAG)")
 st.caption(
@@ -178,6 +235,7 @@ with tab_ask:
             st.json(data)
 
 with tab_ingest:
+    st.caption("Demo publiczne — guardrail przy ingeście jest w backlogu (Week 3).")
     with st.form("ingest_form"):
         doc_text = st.text_area(
             "Treść dokumentu",
@@ -217,6 +275,10 @@ with tab_agent:
     st.caption(
         "Agent działa lokalnie (import modułu `agent_raw` / `agent_graph`), "
         "korzysta z tej samej bazy wektorowej co /ask. UI nie zawiera logiki agenta."
+    )
+    st.info(
+        "Agent działa na lokalnej bazie wektorowej — na wdrożonej instancji "
+        "korpus jest pusty. Dowód działania: zrzuty w zgłoszeniu Week 3."
     )
 
     st.markdown("**Pytania demonstracyjne** (kliknij, żeby wypełnić pole):")
@@ -347,63 +409,43 @@ with tab_evals:
     if st.button("Uruchom zestaw evali", type="primary", key="run_evals_btn"):
         # Import w środku — zakładki /ask i /ingest mają działać także bez
         # wygenerowanych trace'ów (np. świeży klon repo).
-        from evals.run_evals import build_report
+        from evals.run_evals import KIND, build_report
 
         with st.spinner("Liczę asercje na najnowszych trace'ach…"):
             try:
-                st.session_state["eval_report"] = build_report()
-            except Exception as exc:  # brak pliku trace'ów itp. — pokazujemy wprost
+                try:
+                    report = build_report()
+                except FileNotFoundError:
+                    report = None  # instancja bez traces/ (katalog nie wchodzi do repo)
+                # Świeży wynik tylko z KOMPLETU pytań: na wdrożonej instancji
+                # traces.jsonl ma co najwyżej pojedyncze przebiegi z zakładki
+                # Agent — liczenie z nich udawałoby pełny eval.
+                if report and report["summary"]["questions"] == len(KIND):
+                    st.session_state["eval_report"] = report
+                    st.session_state["eval_report_saved"] = False
+                else:
+                    saved_path = (
+                        Path(__file__).resolve().parent / "evals" / "report_after_fix3.json"
+                    )
+                    st.session_state["eval_report"] = json.loads(
+                        saved_path.read_text(encoding="utf-8")
+                    )
+                    st.session_state["eval_report_saved"] = True
+            except Exception as exc:  # pokazujemy wprost, nie chowamy
+                st.session_state.pop("eval_report", None)
                 st.error(f"Nie udało się policzyć evali: {exc}")
 
     eval_report = st.session_state.get("eval_report")
     if eval_report:
-        summary = eval_report["summary"]
-        baseline = None
-        baseline_path = Path(__file__).resolve().parent / "evals" / "report_baseline.json"
-        if baseline_path.exists():
-            baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-
-        st.markdown("### Wynik zestawu")
-        delta = None
-        if baseline:
-            delta_pp = (summary["pass_rate"] - baseline["summary"]["pass_rate"]) * 100
-            delta = f"{delta_pp:+.1f} pp vs baseline"
-        eval_cols = st.columns(3)
-        eval_cols[0].metric("PASS RATE", f"{summary['pass_rate']:.1%}", delta)
-        eval_cols[1].metric(
-            "Asercje zaliczone", f"{summary['checks_passed']}/{summary['checks_total']}"
-        )
-        eval_cols[2].metric("Pytań ocenionych", summary["questions"])
-
-        st.markdown("### Per asercja — baseline (PRZED) vs teraz (PO)")
-        table_rows = []
-        for name in sorted(eval_report["per_assertion"]):
-            now = eval_report["per_assertion"][name]
-            row = {"asercja": name}
-            if baseline and name in baseline["per_assertion"]:
-                b = baseline["per_assertion"][name]
-                row["baseline"] = f"{b['pass']}/{b['total']}"
-            row["teraz"] = f"{now['pass']}/{now['total']}"
-            if baseline and name in baseline["per_assertion"]:
-                row["zmiana"] = now["pass"] - baseline["per_assertion"][name]["pass"]
-            table_rows.append(row)
-        st.dataframe(table_rows, width="stretch", hide_index=True)
-
-        if eval_report["failures"]:
-            st.markdown("### Porażki (werdykt binarny + powód jednym zdaniem)")
-            for failure in eval_report["failures"]:
-                st.warning(
-                    f"**{failure['qid']}** · {failure['engine']} · "
-                    f"`{failure['assertion']}` — {failure['reason']}"
-                )
-        else:
-            st.success("Zero porażek.")
-
-        st.caption(
-            "Baseline = stan sprzed poprawek promptu (evals/report_baseline.json). "
-            "Known-fail: q12 — fałszywa odmowa przy pytaniu wymagającym wnioskowania "
-            "(3 nieudane iteracje promptowe; kandydat na mocniejszy model w tej roli)."
-        )
+        try:
+            render_eval_report(
+                eval_report, st.session_state.get("eval_report_saved", False)
+            )
+        except Exception as exc:
+            # Przełączenie zakładki = rerun CAŁEGO skryptu, więc raport, którego
+            # nie da się narysować, ubijałby wszystkie zakładki — leci ze stanu.
+            st.session_state.pop("eval_report", None)
+            st.error(f"Nie udało się wyświetlić raportu evali: {exc}")
 
 with tab_memory:
     st.markdown(
