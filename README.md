@@ -4,6 +4,46 @@ This folder is the simplified class version of the Week 1 AI Engineering bootcam
 Students run one final API and one small Streamlit page. The `stages/` files are optional
 teaching references that show how the endpoint grows step by step.
 
+## Memory store (Week 5 — capstone)
+
+Jarvis has a **durable, cross-session memory** that survives process restarts and lives
+outside the request/context window.
+
+**In one paragraph (keep / write / live / retrieve / forget):** We **keep** a small set of
+high-value durable facts — stable user preferences and project facts (e.g. billing
+currency, main client) — as one-sentence statements, never raw chat turns. We **write**
+through a gate: cheap rules pre-filter the turn, then a small model (`gpt-4o-mini`) decides
+whether it is a durable fact and extracts `subject` + `fact`; only then do we embed and
+insert (task-local chatter is dropped). It **lives** in an external **Neon Postgres database
+with the `pgvector` extension** (serverless — survives redeploys and restarts), kept
+separate from the app's ephemeral disk. We **retrieve** relevant facts before answering with
+a hybrid query — `0.7 × cosine similarity + 0.3 × recency` — so a recent decision outranks
+older chatter, and retrieval is by meaning (a query without the exact word still finds the
+fact). We **forget** softly today via the recency term (older facts rank lower); hard
+forgetting — a `stale_after` expiry, human-verified staging (`verified_by`), a real delete
+path, and "new fact replaces the contradicted old one" — has schema columns ready but is
+**deliberately deferred to the capstone** (the assignment is kept simple).
+
+**Schema (`semantic_memory`, Postgres + pgvector):**
+
+```sql
+id bigserial PK · subject text · fact text · embedding vector(1536) ·
+confidence real · source_event_id text · verified_by text · stale_after date ·
+created_at timestamptz · updated_at timestamptz
+```
+
+Embeddings use `text-embedding-3-small` (1536 dims) — the same model as the RAG corpus.
+Fields follow the Open Knowledge Format (OKF): `fact` ≈ description, `source_event_id` ≈
+provenance, `verified_by` ≈ trust/staging, `stale_after` ≈ lifecycle. The write path lives
+in `write_gate.py`, the store and hybrid read in `memory_store.py`, and the demo in the
+"Pamięć (Week 5)" tab of `demo_page.py`.
+
+**Deployment:** two Render services — `jarvis` (FastAPI backend, Docker) and `jarvis-ui`
+(Streamlit, Python), both in Oregon. The memory tab lives in `jarvis-ui` and reaches Neon +
+OpenAI via environment variables (`DATABASE_URL`, `OPENAI_API_KEY`). Cross-session recall is
+demonstrated live: a fact written by a local process is recalled by the deployed app from a
+query that never mentions it.
+
 ## What Students Will Build
 
 A typed FastAPI endpoint that accepts a question and returns:
