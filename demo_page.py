@@ -4,6 +4,9 @@ UI tylko woła API albo kod agenta — cała logika (RAG, pętla Think/Act/Obser
 mieszka w FastAPI i modułach `agent_raw` / `agent_graph`. Zero sekretów po
 stronie strony: adres API z paska bocznego.
 
+Upload plików (txt/md/docx/xlsx/csv/pdf) parsuje się TUTAJ, w Streamlicie —
+do `/ingest` idzie już czysty tekst, więc backend pozostaje bez zmian.
+
 Uwaga: zakładka Agent uruchamia agenta LOKALNIE (import modułu), bo agent nie
 jest wystawiony na Renderze — zadanie Week 3 wymaga zrzutu/klipu UI, nie URL-a.
 
@@ -11,7 +14,10 @@ Run:
   streamlit run demo_page.py
 """
 
+import csv
+import io
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -19,6 +25,8 @@ import streamlit as st
 
 WORKDIR_CMD = "projekty/jarvis"
 MODELS = ["gpt-4o-mini", "gpt-4o", "o3-mini"]
+UPLOAD_TYPES = ["txt", "md", "docx", "xlsx", "csv", "pdf"]
+PREVIEW_CHARS = 500
 
 
 def build_payload(question: str, model: str, force_bad: bool) -> dict:
@@ -53,6 +61,144 @@ def call_json(method: str, url: str, payload: dict | None = None) -> tuple[int, 
         return 0, {"error": f"Cannot reach {url}. Start the API server first."}
     except httpx.HTTPError as exc:
         return 0, {"error": str(exc)}
+
+
+# --- Parsowanie wgranych plików: dzieje się w CAŁOŚCI w Streamlicie ---------
+# Do /ingest leci już czysty tekst — endpoint i reszta backendu bez zmian.
+
+
+def propose_document_id(filename: str) -> str:
+    """„umowa-najmu.docx" → „UMOWA-NAJMU" — propozycja do ręcznej poprawki."""
+    stem = Path(filename).stem
+    cleaned = re.sub(r"[\s_]+", "-", stem.strip())
+    cleaned = re.sub(r"[^\w-]", "", cleaned)
+    cleaned = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    return cleaned.upper() or "DOKUMENT"
+
+
+def _decode_text(raw: bytes) -> str:
+    # UTF-8 (także z BOM) pierwszy; CP1250 łapie pliki z polskiego Windowsa.
+    for encoding in ("utf-8-sig", "cp1250"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(
+        "nie udało się odczytać pliku jako tekstu (próbowałem UTF-8 i CP1250) — "
+        "to raczej plik binarny albo w nietypowym kodowaniu."
+    )
+
+
+def _extract_csv(raw: bytes) -> str:
+    text = _decode_text(raw)
+    try:
+        dialect = csv.Sniffer().sniff(text[:2048], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel  # nie wykrył separatora → przecinek jak w Excelu
+    rows = csv.reader(io.StringIO(text), dialect)
+    # Komórki sklejamy przez „ | ": chunk czyta się jak tabela, nie jak zlepek.
+    lines = [
+        " | ".join(cell.strip() for cell in row)
+        for row in rows
+        if any(cell.strip() for cell in row)
+    ]
+    return "\n".join(lines)
+
+
+def _extract_docx(raw: bytes) -> str:
+    # Import w środku — strona ma wstać także bez doinstalowanych parserów.
+    from docx import Document
+
+    document = Document(io.BytesIO(raw))
+    parts = [paragraph.text for paragraph in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            parts.append(" | ".join(cell.text.strip() for cell in row.cells))
+    return "\n".join(parts)
+
+
+def _extract_xlsx(raw: bytes) -> str:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    parts = []
+    for sheet in workbook.worksheets:
+        parts.append(f"[Arkusz: {sheet.title}]")
+        for row in sheet.iter_rows(values_only=True):
+            cells = [str(value).strip() for value in row if value is not None]
+            if cells:
+                parts.append(" | ".join(cells))
+    workbook.close()
+    return "\n".join(parts)
+
+
+def _extract_pdf(raw: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    if reader.is_encrypted:
+        try:
+            reader.decrypt("")  # puste hasło otwiera PDF-y „zamknięte" tylko technicznie
+        except Exception:
+            raise ValueError("PDF jest zabezpieczony hasłem — wgraj wersję bez hasła.")
+    text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    if not text:
+        raise ValueError(
+            f"PDF nie ma warstwy tekstowej ({len(reader.pages)} str.) — to "
+            "prawdopodobnie skan z obrazów. Potrzebny OCR, albo wklej tekst "
+            "ręcznie w polu poniżej."
+        )
+    return text
+
+
+@st.cache_data(show_spinner=False)
+def extract_text_from_upload(filename: str, raw: bytes) -> str:
+    """Czysty tekst z pliku; ValueError z polskim komunikatem, gdy się nie da."""
+    suffix = Path(filename).suffix.lower()
+    extractors = {
+        ".txt": _decode_text,
+        ".md": _decode_text,
+        ".csv": _extract_csv,
+        ".docx": _extract_docx,
+        ".xlsx": _extract_xlsx,
+        ".pdf": _extract_pdf,
+    }
+    if suffix not in extractors:
+        raise ValueError(f"nieobsługiwane rozszerzenie: {suffix or 'brak'}.")
+
+    try:
+        text = extractors[suffix](raw)
+    except ValueError:
+        raise  # nasze komunikaty przechodzą bez opakowania
+    except ImportError as exc:
+        raise ValueError(
+            f"brak biblioteki do tego formatu ({exc.name}) — uruchom: "
+            "pip install -r requirements.txt."
+        ) from exc
+    except Exception as exc:
+        raise ValueError(
+            f"nie udało się odczytać pliku ({type(exc).__name__}) — plik może "
+            "być uszkodzony albo w innym formacie, niż wskazuje rozszerzenie."
+        ) from exc
+
+    text = text.strip()
+    if not text:
+        raise ValueError("plik nie zawiera żadnego tekstu — nie ma czego indeksować.")
+    return text
+
+
+def ingest_and_render(base_url: str, text: str, document_id: str, source: str) -> None:
+    """Wysyła tekst do /ingest i rysuje wynik — wspólne dla uploadu i wklejki."""
+    payload = {"text": text, "document_id": document_id, "source": source}
+    with st.spinner("Wołam /ingest…"):
+        status, data = call_json("POST", f"{base_url.rstrip('/')}/ingest", payload)
+    st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
+    if status == 200 and isinstance(data, dict):
+        st.success(
+            f"Zaindeksowano **{data.get('document_id')}** → "
+            f"{data.get('chunks_indexed')} chunk(ów), status: {data.get('status')}"
+        )
+    st.json(data)
 
 
 def render_attempts(data: dict | str) -> None:
@@ -211,8 +357,8 @@ with tab_ask:
     with st.form("ask_form"):
         question = st.text_area(
             "Pytanie",
-            "How many remote days are allowed?",
             height=100,
+            placeholder="Zadaj pytanie o zaindeksowane dokumenty…",
         )
         model = st.selectbox("Model", MODELS, index=0)
         force_bad = st.checkbox(
@@ -236,6 +382,59 @@ with tab_ask:
 
 with tab_ingest:
     st.caption("Demo publiczne — guardrail przy ingeście jest w backlogu (Week 3).")
+
+    st.markdown("### Wgraj plik")
+    st.caption(
+        "Parsowanie dzieje się tutaj, w Streamlicie — do API leci już czysty "
+        "tekst, więc endpoint `/ingest` pozostaje bez zmian. Obsługiwane: "
+        + ", ".join(f".{ext}" for ext in UPLOAD_TYPES)
+        + "."
+    )
+    uploads = st.file_uploader(
+        "Pliki do zaindeksowania",
+        type=UPLOAD_TYPES,
+        accept_multiple_files=True,
+        key="ingest_uploads",
+    )
+    for position, upload in enumerate(uploads or []):
+        if position:
+            st.divider()
+        try:
+            extracted = extract_text_from_upload(upload.name, upload.getvalue())
+        except ValueError as exc:
+            # Zły plik ≠ wyjątek na ekranie: pokazujemy powód i idziemy dalej.
+            st.error(f"**{upload.name}** — {exc}")
+            continue
+
+        st.markdown(
+            f"**{upload.name}** — wyciągnięto **{len(extracted)}** znaków; "
+            f"podgląd pierwszych {min(len(extracted), PREVIEW_CHARS)}:"
+        )
+        preview_suffix = "…" if len(extracted) > PREVIEW_CHARS else ""
+        st.code(
+            extracted[:PREVIEW_CHARS] + preview_suffix,
+            language=None,
+            wrap_lines=True,
+            height=200,
+        )
+        upload_document_id = st.text_input(
+            "document_id (zaproponowany z nazwy pliku — możesz poprawić)",
+            value=propose_document_id(upload.name),
+            key=f"upload_docid_{position}_{upload.name}",
+        )
+        if st.button(
+            "Zaindeksuj ten plik",
+            key=f"upload_send_{position}_{upload.name}",
+            type="primary",
+        ):
+            if not upload_document_id.strip():
+                st.warning("Podaj document_id — pole nie może być puste.")
+            else:
+                ingest_and_render(
+                    base_url, extracted, upload_document_id.strip(), upload.name
+                )
+
+    st.markdown("### …albo wklej tekst ręcznie")
     with st.form("ingest_form"):
         doc_text = st.text_area(
             "Treść dokumentu",
@@ -249,22 +448,7 @@ with tab_ingest:
         ingest_submitted = st.form_submit_button("Zaindeksuj", type="primary")
 
     if ingest_submitted:
-        ingest_payload = {
-            "text": doc_text,
-            "document_id": document_id,
-            "source": doc_source,
-        }
-        with st.spinner("Wołam /ingest…"):
-            status, data = call_json(
-                "POST", f"{base_url.rstrip('/')}/ingest", ingest_payload
-            )
-        st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
-        if status == 200 and isinstance(data, dict):
-            st.success(
-                f"Zaindeksowano **{data.get('document_id')}** → "
-                f"{data.get('chunks_indexed')} chunk(ów), status: {data.get('status')}"
-            )
-        st.json(data)
+        ingest_and_render(base_url, doc_text, document_id, doc_source)
 
 with tab_agent:
     st.markdown(
@@ -281,19 +465,6 @@ with tab_agent:
         "korpus jest pusty. Dowód działania: zrzuty w zgłoszeniu Week 3."
     )
 
-    st.markdown("**Pytania demonstracyjne** (kliknij, żeby wypełnić pole):")
-    demo_cols = st.columns(3)
-    if demo_cols[0].button("Praca z domu na stałe?", use_container_width=True):
-        st.session_state["agent_question"] = "Czy mogę pracować z domu na stałe?"
-    if demo_cols[1].button("How many remote days? (EN)", use_container_width=True):
-        st.session_state["agent_question"] = "How many remote days are allowed?"
-    if demo_cols[2].button("Paragon — co dalej?", use_container_width=True):
-        st.session_state["agent_question"] = (
-            "Co się stanie, jeśli nie dostarczę paragonu?"
-        )
-    if st.button("Pułapka: parental leave (brak w dokumentach)"):
-        st.session_state["agent_question"] = "What is the parental leave policy?"
-
     # Formularz: przełącznik silnika i pytanie NIE wywołują przeładowania strony
     # (Streamlit przy każdym rerunie wracał do pierwszej zakładki — psuło demo).
     with st.form("agent_form"):
@@ -301,6 +472,7 @@ with tab_agent:
             "Pytanie do agenta",
             key="agent_question",
             height=80,
+            placeholder="Zapytaj o coś z zaindeksowanych dokumentów…",
         )
         engine_label = st.radio(
             "Silnik pętli",
@@ -312,7 +484,7 @@ with tab_agent:
 
     if run_clicked:
         if not (agent_question or "").strip():
-            st.warning("Wpisz pytanie albo wybierz jedno z przykładowych.")
+            st.warning("Wpisz pytanie do agenta.")
         else:
             # Import w środku: Streamlit ma wystartować także wtedy, gdy ktoś
             # używa tylko zakładek /ask i /ingest (np. bez klucza OpenAI).
