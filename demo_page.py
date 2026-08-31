@@ -28,12 +28,114 @@ MODELS = ["gpt-4o-mini", "gpt-4o", "o3-mini"]
 UPLOAD_TYPES = ["txt", "md", "docx", "xlsx", "csv", "pdf"]
 PREVIEW_CHARS = 500
 
+# Przełącznik językowy (demo 1:1): etykiety UI + pole `language` w payload /ask —
+# wybór promptu PL/EN robi BACKEND. Tłumaczymy rdzeń demo (zakładki /ask i
+# /ingest); Agent/Evale/Pamięć zostają po polsku, bo ich treść (ślady, raporty)
+# i tak jest polska. Komunikaty błędów parsera plików również zostają po polsku.
+UI_TEXTS = {
+    "pl": {
+        "title": "Jarvis: pytania do dokumentów (RAG)",
+        "caption": (
+            "Streamlit tylko woła API — cała logika RAG (chunking, retrieval, grounding) "
+            "mieszka w FastAPI. Pliki `stages/` pokazują, jak endpoint rósł krok po kroku."
+        ),
+        "health_button": "Sprawdź /health",
+        "tabs": [
+            "Zadaj pytanie (/ask)",
+            "Dodaj dokument (/ingest)",
+            "Agent (Week 3)",
+            "Evale (Week 4)",
+            "Pamięć (Week 5)",
+        ],
+        "question_label": "Pytanie",
+        "question_placeholder": "Zadaj pytanie o zaindeksowane dokumenty…",
+        "model_label": "Model",
+        "force_bad_label": "Wymuś zepsutą pierwszą odpowiedź (demo walidacji + retry z Week 1)",
+        "ask_button": "Zapytaj",
+        "ask_spinner": "Wołam /ask… (uśpiony Render może się budzić do ~1 min)",
+        "full_json": "Pełny JSON odpowiedzi",
+        "answer_header": "### Odpowiedź",
+        "not_in_docs": "Brak w dokumentach",
+        "sources_prefix": "**Źródła (cytowane):** ",
+        "sources_none": "**Źródła (cytowane):** _brak — odpowiedź nie cytuje żadnego dokumentu_",
+        "chunks_prefix": "**Pobrane chunki (retrieval):** ",
+        "ingest_caption": "Demo publiczne — guardrail przy ingeście jest w backlogu (Week 3).",
+        "upload_header": "### Wgraj plik",
+        "upload_caption": (
+            "Parsowanie dzieje się tutaj, w Streamlicie — do API leci już czysty "
+            "tekst, więc endpoint `/ingest` pozostaje bez zmian. Obsługiwane: {types}."
+        ),
+        "upload_label": "Pliki do zaindeksowania",
+        "extracted_line": "**{name}** — wyciągnięto **{count}** znaków; podgląd pierwszych {preview}:",
+        "docid_label": "document_id (zaproponowany z nazwy pliku — możesz poprawić)",
+        "index_file_button": "Zaindeksuj ten plik",
+        "docid_required": "Podaj document_id — pole nie może być puste.",
+        "manual_header": "### …albo wklej tekst ręcznie",
+        "doc_text_label": "Treść dokumentu",
+        "doc_text_placeholder": "Wklej pełny tekst dokumentu do zaindeksowania…",
+        "docid_manual_placeholder": "np. POL-101",
+        "source_label": "source (opcjonalne)",
+        "source_placeholder": "np. doc1_handbook.txt",
+        "index_button": "Zaindeksuj",
+        "ingest_spinner": "Wołam /ingest…",
+        "ingest_success": "Zaindeksowano **{doc}** → {chunks} chunk(ów), status: {status}",
+    },
+    "en": {
+        "title": "Jarvis: ask your documents (RAG)",
+        "caption": (
+            "Streamlit only calls the API — all RAG logic (chunking, retrieval, grounding) "
+            "lives in FastAPI. The `stages/` files show how the endpoint grew step by step."
+        ),
+        "health_button": "Check /health",
+        "tabs": [
+            "Ask a question (/ask)",
+            "Add a document (/ingest)",
+            "Agent (Week 3)",
+            "Evals (Week 4)",
+            "Memory (Week 5)",
+        ],
+        "question_label": "Question",
+        "question_placeholder": "Ask about the indexed documents…",
+        "model_label": "Model",
+        "force_bad_label": "Force a broken first answer (validation + retry demo from Week 1)",
+        "ask_button": "Ask",
+        "ask_spinner": "Calling /ask… (a sleeping Render instance may take up to ~1 min)",
+        "full_json": "Full JSON response",
+        "answer_header": "### Answer",
+        "not_in_docs": "Not in the documents",
+        "sources_prefix": "**Sources (cited):** ",
+        "sources_none": "**Sources (cited):** _none — the answer cites no document_",
+        "chunks_prefix": "**Retrieved chunks:** ",
+        "ingest_caption": "Public demo — an ingest guardrail is in the backlog (Week 3).",
+        "upload_header": "### Upload a file",
+        "upload_caption": (
+            "Parsing happens right here, in Streamlit — the API receives plain "
+            "text, so the `/ingest` endpoint stays unchanged. Supported: {types}."
+        ),
+        "upload_label": "Files to index",
+        "extracted_line": "**{name}** — extracted **{count}** characters; preview of the first {preview}:",
+        "docid_label": "document_id (proposed from the file name — feel free to edit)",
+        "index_file_button": "Index this file",
+        "docid_required": "document_id cannot be empty.",
+        "manual_header": "### …or paste text manually",
+        "doc_text_label": "Document text",
+        "doc_text_placeholder": "Paste the full text of the document to index…",
+        "docid_manual_placeholder": "e.g. POL-101",
+        "source_label": "source (optional)",
+        "source_placeholder": "e.g. doc1_handbook.txt",
+        "index_button": "Index",
+        "ingest_spinner": "Calling /ingest…",
+        "ingest_success": "Indexed **{doc}** → {chunks} chunk(s), status: {status}",
+    },
+}
 
-def build_payload(question: str, model: str, force_bad: bool) -> dict:
+
+def build_payload(question: str, model: str, force_bad: bool, language: str) -> dict:
     return {
         "question": question,
         "model": model,
         "force_bad": force_bad,
+        "language": language,
     }
 
 
@@ -187,16 +289,21 @@ def extract_text_from_upload(filename: str, raw: bytes) -> str:
     return text
 
 
-def ingest_and_render(base_url: str, text: str, document_id: str, source: str) -> None:
+def ingest_and_render(
+    base_url: str, text: str, document_id: str, source: str, texts: dict
+) -> None:
     """Wysyła tekst do /ingest i rysuje wynik — wspólne dla uploadu i wklejki."""
     payload = {"text": text, "document_id": document_id, "source": source}
-    with st.spinner("Wołam /ingest…"):
+    with st.spinner(texts["ingest_spinner"]):
         status, data = call_json("POST", f"{base_url.rstrip('/')}/ingest", payload)
     st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
     if status == 200 and isinstance(data, dict):
         st.success(
-            f"Zaindeksowano **{data.get('document_id')}** → "
-            f"{data.get('chunks_indexed')} chunk(ów), status: {data.get('status')}"
+            texts["ingest_success"].format(
+                doc=data.get("document_id"),
+                chunks=data.get("chunks_indexed"),
+                status=data.get("status"),
+            )
         )
     st.json(data)
 
@@ -223,24 +330,24 @@ def render_attempts(data: dict | str) -> None:
                 st.code(attempt["validation_error"], language="text")
 
 
-def render_response_summary(data: dict | str) -> None:
+def render_response_summary(data: dict | str, texts: dict) -> None:
     if not isinstance(data, dict) or "error" in data:
         return
 
     answer = data.get("answer")
     if isinstance(answer, dict):
-        st.markdown("### Odpowiedź")
+        st.markdown(texts["answer_header"])
         if answer.get("i_dont_know"):
             # Odmowa ma być czytelna od razu, nie ukryta w polu boolean.
-            st.warning(f"**Brak w dokumentach** — {answer.get('answer', '')}")
+            st.warning(f"**{texts['not_in_docs']}** — {answer.get('answer', '')}")
         else:
             st.success(answer.get("answer", ""))
 
         source = answer.get("source") or []
         if source:
-            st.markdown("**Źródła (cytowane):** " + " ".join(f"`{s}`" for s in source))
+            st.markdown(texts["sources_prefix"] + " ".join(f"`{s}`" for s in source))
         else:
-            st.markdown("**Źródła (cytowane):** _brak — odpowiedź nie cytuje żadnego dokumentu_")
+            st.markdown(texts["sources_none"])
         st.caption(
             f"confidence: {answer.get('confidence')} | "
             f"sources_needed: {answer.get('sources_needed')} | "
@@ -249,9 +356,7 @@ def render_response_summary(data: dict | str) -> None:
 
     retrieved = data.get("retrieved_chunks") or []
     if retrieved:
-        st.markdown(
-            "**Pobrane chunki (retrieval):** " + " ".join(f"`{c}`" for c in retrieved)
-        )
+        st.markdown(texts["chunks_prefix"] + " ".join(f"`{c}`" for c in retrieved))
 
     metric_cols = st.columns(4)
     metric_cols[0].metric("Model", str(data.get("model", "-")))
@@ -318,11 +423,18 @@ def render_eval_report(eval_report: dict, saved: bool) -> None:
 
 
 st.set_page_config(page_title="Jarvis — demo RAG (Week 2)", layout="centered")
-st.title("Jarvis: pytania do dokumentów (RAG)")
-st.caption(
-    "Streamlit tylko woła API — cała logika RAG (chunking, retrieval, grounding) "
-    "mieszka w FastAPI. Pliki `stages/` pokazują, jak endpoint rósł krok po kroku."
+
+# Przełącznik języka PRZED tytułem — etykiety całej strony zależą od wyboru.
+# Uwaga demo: zmiana języka przebudowuje zakładki (wracają do pierwszej),
+# więc język wybieramy RAZ, na początku pokazu.
+language_choice = st.sidebar.radio(
+    "Język / Language", ["Polski", "English"], horizontal=True, key="ui_language"
 )
+LANG = "pl" if language_choice == "Polski" else "en"
+T = UI_TEXTS[LANG]
+
+st.title(T["title"])
+st.caption(T["caption"])
 
 base_url = st.sidebar.text_input("API base URL", "https://jarvis-8lpg.onrender.com")
 st.sidebar.markdown("### Start the API")
@@ -338,60 +450,48 @@ st.sidebar.code(
     language="bash",
 )
 
-if st.sidebar.button("Sprawdź /health"):
+if st.sidebar.button(T["health_button"]):
     status, data = call_json("GET", f"{base_url.rstrip('/')}/health")
     st.sidebar.markdown(f"**HTTP {status}**" if status else "**Brak połączenia**")
     st.sidebar.json(data)
 
-tab_ask, tab_ingest, tab_agent, tab_evals, tab_memory = st.tabs(
-    [
-        "Zadaj pytanie (/ask)",
-        "Dodaj dokument (/ingest)",
-        "Agent (Week 3)",
-        "Evale (Week 4)",
-        "Pamięć (Week 5)",
-    ]
-)
+tab_ask, tab_ingest, tab_agent, tab_evals, tab_memory = st.tabs(T["tabs"])
 
 with tab_ask:
     with st.form("ask_form"):
         question = st.text_area(
-            "Pytanie",
+            T["question_label"],
             height=100,
-            placeholder="Zadaj pytanie o zaindeksowane dokumenty…",
+            placeholder=T["question_placeholder"],
         )
-        model = st.selectbox("Model", MODELS, index=0)
-        force_bad = st.checkbox(
-            "Wymuś zepsutą pierwszą odpowiedź (demo walidacji + retry z Week 1)",
-            value=False,
-        )
-        submitted = st.form_submit_button("Zapytaj", type="primary")
+        model = st.selectbox(T["model_label"], MODELS, index=0)
+        force_bad = st.checkbox(T["force_bad_label"], value=False)
+        submitted = st.form_submit_button(T["ask_button"], type="primary")
 
-    payload = build_payload(question, model, force_bad)
+    payload = build_payload(question, model, force_bad, LANG)
     st.markdown("#### Request")
     st.code(render_curl(base_url, payload), language="bash")
 
     if submitted:
-        with st.spinner("Wołam /ask… (uśpiony Render może się budzić do ~1 min)"):
+        with st.spinner(T["ask_spinner"]):
             status, data = call_json("POST", f"{base_url.rstrip('/')}/ask", payload)
         st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
-        render_response_summary(data)
+        render_response_summary(data, T)
         render_attempts(data)
-        with st.expander("Pełny JSON odpowiedzi"):
+        with st.expander(T["full_json"]):
             st.json(data)
 
 with tab_ingest:
-    st.caption("Demo publiczne — guardrail przy ingeście jest w backlogu (Week 3).")
+    st.caption(T["ingest_caption"])
 
-    st.markdown("### Wgraj plik")
+    st.markdown(T["upload_header"])
     st.caption(
-        "Parsowanie dzieje się tutaj, w Streamlicie — do API leci już czysty "
-        "tekst, więc endpoint `/ingest` pozostaje bez zmian. Obsługiwane: "
-        + ", ".join(f".{ext}" for ext in UPLOAD_TYPES)
-        + "."
+        T["upload_caption"].format(
+            types=", ".join(f".{ext}" for ext in UPLOAD_TYPES)
+        )
     )
     uploads = st.file_uploader(
-        "Pliki do zaindeksowania",
+        T["upload_label"],
         type=UPLOAD_TYPES,
         accept_multiple_files=True,
         key="ingest_uploads",
@@ -407,8 +507,11 @@ with tab_ingest:
             continue
 
         st.markdown(
-            f"**{upload.name}** — wyciągnięto **{len(extracted)}** znaków; "
-            f"podgląd pierwszych {min(len(extracted), PREVIEW_CHARS)}:"
+            T["extracted_line"].format(
+                name=upload.name,
+                count=len(extracted),
+                preview=min(len(extracted), PREVIEW_CHARS),
+            )
         )
         preview_suffix = "…" if len(extracted) > PREVIEW_CHARS else ""
         st.code(
@@ -418,37 +521,39 @@ with tab_ingest:
             height=200,
         )
         upload_document_id = st.text_input(
-            "document_id (zaproponowany z nazwy pliku — możesz poprawić)",
+            T["docid_label"],
             value=propose_document_id(upload.name),
             key=f"upload_docid_{position}_{upload.name}",
         )
         if st.button(
-            "Zaindeksuj ten plik",
+            T["index_file_button"],
             key=f"upload_send_{position}_{upload.name}",
             type="primary",
         ):
             if not upload_document_id.strip():
-                st.warning("Podaj document_id — pole nie może być puste.")
+                st.warning(T["docid_required"])
             else:
                 ingest_and_render(
-                    base_url, extracted, upload_document_id.strip(), upload.name
+                    base_url, extracted, upload_document_id.strip(), upload.name, T
                 )
 
-    st.markdown("### …albo wklej tekst ręcznie")
+    st.markdown(T["manual_header"])
     with st.form("ingest_form"):
         doc_text = st.text_area(
-            "Treść dokumentu",
+            T["doc_text_label"],
             height=220,
-            placeholder="Wklej pełny tekst dokumentu do zaindeksowania…",
+            placeholder=T["doc_text_placeholder"],
         )
-        document_id = st.text_input("document_id", placeholder="np. POL-101")
+        document_id = st.text_input(
+            "document_id", placeholder=T["docid_manual_placeholder"]
+        )
         doc_source = st.text_input(
-            "source (opcjonalne)", placeholder="np. doc1_handbook.txt"
+            T["source_label"], placeholder=T["source_placeholder"]
         )
-        ingest_submitted = st.form_submit_button("Zaindeksuj", type="primary")
+        ingest_submitted = st.form_submit_button(T["index_button"], type="primary")
 
     if ingest_submitted:
-        ingest_and_render(base_url, doc_text, document_id, doc_source)
+        ingest_and_render(base_url, doc_text, document_id, doc_source, T)
 
 with tab_agent:
     st.markdown(
