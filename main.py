@@ -142,6 +142,34 @@ SYSTEM_PROMPT_EN = (
 )
 PROMPT_VERSION_EN = prompt_version(SYSTEM_PROMPT_EN)
 
+# Ścieżka reasoned (naprawa Q3): bazowe prompty PL/EN zostają bajt w bajt,
+# wariant DOKLEJA regułę 7 — stąd osobne odciski wersji do trace'ów.
+_REASONED_RULE_PL = (
+    "\n7. Gdy pytanie dotyczy liczb, progów, limitów albo największej/najmniejszej "
+    "wartości: NAJPIERW wypełniasz pole `rachunek` — wypisujesz w nim wszystkie "
+    "istotne wartości z etykietami i działania krok po kroku — a werdykt w polu "
+    "`answer` musi wprost wynikać z tego rachunku. Pole `rachunek` zostawiasz "
+    "puste wyłącznie przy pytaniach zupełnie bez liczb."
+)
+_REASONED_RULE_EN = (
+    "\n7. Whenever the question involves numbers, thresholds, limits or finding "
+    "the largest/smallest value: FIRST fill the `rachunek` field — list all "
+    "relevant values with their labels and the step-by-step work — and the "
+    "verdict in `answer` must follow directly from that work. Leave `rachunek` "
+    "empty only for questions with no numbers at all."
+)
+SYSTEM_PROMPT_REASONED = SYSTEM_PROMPT + _REASONED_RULE_PL
+SYSTEM_PROMPT_REASONED_EN = SYSTEM_PROMPT_EN + _REASONED_RULE_EN
+PROMPT_VERSION_REASONED = prompt_version(SYSTEM_PROMPT_REASONED)
+PROMPT_VERSION_REASONED_EN = prompt_version(SYSTEM_PROMPT_REASONED_EN)
+
+
+def prompt_version_for(language: str, reasoned: bool) -> str:
+    """Odcisk promptu FAKTYCZNIE użytego w danym przebiegu (do trace'ów)."""
+    if reasoned:
+        return PROMPT_VERSION_REASONED if language == "pl" else PROMPT_VERSION_REASONED_EN
+    return PROMPT_VERSION if language == "pl" else PROMPT_VERSION_EN
+
 
 class Answer(BaseModel):
     """Kształt odpowiedzi, który za każdym razem dostaje klient endpointu."""
@@ -227,6 +255,114 @@ class AnswerEN(BaseModel):
     )
 
 
+class AnswerReasoned(BaseModel):
+    """Wariant „rachunek przed werdyktem" — naprawa biasu ku odmowie (Q3, W6).
+
+    KOLEJNOŚĆ PÓL JEST MECHANIZMEM: structured output generuje pola w kolejności
+    schematu, więc `rachunek` wymusza policzenie PRZED przybiciem pierwszego
+    tokenu werdyktu (pomiar: werdykt-najpierw = zawsze błąd, liczby-najpierw =
+    zawsze dobrze — 8/8 próbek; szczegóły: wiedza/w6-odkrycie-kompletnosc-
+    kontekstu.md). WARIANT obok `Answer` — ścieżka domyślna bajt w bajt.
+    """
+
+    rachunek: str = Field(
+        description=(
+            "OBOWIĄZKOWE, gdy w pytaniu lub odpowiedzi występują liczby. Wypisz "
+            "TUTAJ działania krok po kroku, zanim sformułujesz odpowiedź: przy "
+            "progach/limitach pełne porównanie (np. 15 - 2 = 13; 13 >= 12 → warunek "
+            "spełniony); przy szukaniu największej/najmniejszej wartości NAJPIERW "
+            "wypisz WSZYSTKIE wartości z danymi (np. sty 11000, lut 9000, ...), "
+            "potem wskaż właściwą. Werdykt w polu answer musi wynikać z tego "
+            "rachunku. Pusty string TYLKO przy pytaniach zupełnie bez liczb."
+        )
+    )
+    answer: str = Field(
+        min_length=1,
+        description=(
+            "Zwięzła odpowiedź po polsku, najlepiej 1–3 zdania. Gdy nie masz podstaw "
+            "do rzetelnej odpowiedzi, napisz wprost „nie wiem” i jednym zdaniem dlaczego."
+        ),
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Jak bardzo jesteś pewny odpowiedzi: liczba od 0.0 (czyste zgadywanie) "
+            "do 1.0 (pełna pewność). Przy i_dont_know=true daj wartość bliską 0.0."
+        ),
+    )
+    sources_needed: bool = Field(
+        description=(
+            "true, gdy rzetelna odpowiedź wymagałaby zajrzenia do zewnętrznych źródeł "
+            "lub dokumentów, których nie masz w tej rozmowie; inaczej false."
+        )
+    )
+    i_dont_know: bool = Field(
+        description=(
+            "true, gdy nie masz podstaw do rzetelnej odpowiedzi i uczciwie to przyznajesz "
+            "zamiast zmyślać; false, gdy odpowiadasz merytorycznie."
+        )
+    )
+    source: list[str] = Field(
+        description=(
+            "Lista document_id fragmentów z sekcji KONTEKST faktycznie użytych w "
+            "odpowiedzi (np. [\"POL-101\"]). Pusta lista przy odmowie (i_dont_know=true) "
+            "albo gdy żaden fragment nie był potrzebny."
+        )
+    )
+
+
+class AnswerReasonedEN(BaseModel):
+    """English twin of AnswerReasoned — same field ORDER, English wording."""
+
+    rachunek: str = Field(
+        description=(
+            "MANDATORY whenever numbers appear in the question or the answer. Write "
+            "the step-by-step work HERE before formulating the answer: for thresholds/"
+            "limits the full comparison (e.g. 15 - 2 = 13; 13 >= 12 → condition "
+            "holds); when finding the largest/smallest value FIRST list ALL values "
+            "with their labels (e.g. Jan 11000, Feb 9000, ...), then point at the "
+            "right one. The verdict in `answer` must follow from this work. Empty "
+            "string ONLY for questions with no numbers at all."
+        )
+    )
+    answer: str = Field(
+        min_length=1,
+        description=(
+            "A concise answer in English, ideally 1–3 sentences. When you have no "
+            "grounds for a reliable answer, say plainly that the documents do not "
+            "cover it and give the reason in one sentence."
+        ),
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How confident you are in the answer: from 0.0 (pure guessing) to 1.0 "
+            "(full certainty). With i_dont_know=true keep it close to 0.0."
+        ),
+    )
+    sources_needed: bool = Field(
+        description=(
+            "true when a reliable answer would require external sources or documents "
+            "you do not have in this conversation; otherwise false."
+        )
+    )
+    i_dont_know: bool = Field(
+        description=(
+            "true when you have no grounds for a reliable answer and honestly admit "
+            "it instead of making things up; false when you answer substantively."
+        )
+    )
+    source: list[str] = Field(
+        description=(
+            "List of document_id values of the fragments from the KONTEKST section "
+            "actually used in the answer (e.g. [\"POL-101\"]). Empty list on refusal "
+            "(i_dont_know=true) or when no fragment was needed."
+        )
+    )
+
+
 AnswerLanguage = Literal["pl", "en"]
 
 
@@ -237,6 +373,9 @@ class AskRequest(BaseModel):
     # Domyślne "pl" = każdy dotychczasowy klient (i cały zestaw evali) działa
     # bez zmian; "en" wybiera SYSTEM_PROMPT_EN + AnswerEN.
     language: AnswerLanguage = "pl"
+    # Domyślne False = ścieżka dotychczasowa co do bajta. True wybiera schemat
+    # AnswerReasoned* (pole `rachunek` PRZED `answer`) — naprawa biasu Q3.
+    reasoned: bool = False
 
 
 class IngestRequest(BaseModel):
@@ -249,6 +388,16 @@ class IngestResponse(BaseModel):
     document_id: str
     chunks_indexed: int
     status: str
+
+
+class DocumentInfo(BaseModel):
+    document_id: str
+    chunks: int
+
+
+class DocumentsResponse(BaseModel):
+    documents: list[DocumentInfo]
+    total_chunks: int
 
 
 class RetrieveHit(BaseModel):
@@ -350,14 +499,22 @@ def build_user_message(question: str, context: str) -> str:
 
 
 def call_structured_model(
-    question: str, model: ModelName, context: str, language: AnswerLanguage = "pl"
-) -> tuple[Answer, int, int, int]:
+    question: str,
+    model: ModelName,
+    context: str,
+    language: AnswerLanguage = "pl",
+    reasoned: bool = False,
+) -> tuple[Answer, str, int, int, int]:
     # temperature=0 → powtarzalne odpowiedzi (kluczowe przy golden secie i porównaniach
     # konfiguracji); modele rozumujące (o3-*) nie przyjmują tego parametru.
     extra = {} if model.startswith("o3") else {"temperature": 0}
-    # Domyślne "pl" trzyma dotychczasową ścieżkę co do bajta (prompt + schemat).
-    system_prompt = SYSTEM_PROMPT if language == "pl" else SYSTEM_PROMPT_EN
-    response_format = Answer if language == "pl" else AnswerEN
+    # Domyślne "pl" + reasoned=False trzyma dotychczasową ścieżkę co do bajta.
+    if reasoned:
+        system_prompt = SYSTEM_PROMPT_REASONED if language == "pl" else SYSTEM_PROMPT_REASONED_EN
+        response_format = AnswerReasoned if language == "pl" else AnswerReasonedEN
+    else:
+        system_prompt = SYSTEM_PROMPT if language == "pl" else SYSTEM_PROMPT_EN
+        response_format = Answer if language == "pl" else AnswerEN
     completion = get_client().chat.completions.parse(
         model=model,
         # Kolejność celowa (prompt caching): stała część pierwsza, zmienna ostatnia.
@@ -374,10 +531,13 @@ def call_structured_model(
         raise ValueError("Model returned no parseable structured output")
 
     total_tokens, prompt_tokens, completion_tokens = usage_counts(completion)
+    rachunek = getattr(parsed, "rachunek", "") or ""
     if not isinstance(parsed, Answer):
-        # EN ma identyczne pola — klient API dostaje jeden kształt niezależnie od języka.
-        parsed = Answer(**parsed.model_dump())
-    return parsed, total_tokens, prompt_tokens, completion_tokens
+        # Warianty (EN/Reasoned*) mają te same pola odpowiedzi — klient API dostaje
+        # jeden kształt; `rachunek` wraca osobno (trafia do trace'u, nie do API).
+        payload = {k: v for k, v in parsed.model_dump().items() if k != "rachunek"}
+        parsed = Answer(**payload)
+    return parsed, rachunek, total_tokens, prompt_tokens, completion_tokens
 
 
 def call_malformed_json_once(question: str, model: ModelName) -> tuple[str, int, int, int]:
@@ -455,6 +615,29 @@ def ingest(body: IngestRequest) -> IngestResponse:
     )
 
 
+@app.get("/documents")
+def list_documents() -> DocumentsResponse:
+    """Inwentarz bazy z METADANYCH — właściwy mechanizm dla pytań „wymień wszystkie".
+
+    Zmierzone (odkrycia W5/W6): retrieval semantyczny nie pokrywa pytań
+    inwentarzowych — trzy próby dały trzy różne awarie (pewna odpowiedź 1/4,
+    maks. 4/5 przy TOP_K=20, odmowa przy pokryciu 4/4), bo „wymień wszystko"
+    to agregacja po document_id, nie podobieństwo. Tu nie ma jak chybić:
+    zero LLM, zero embeddingów — czysty odczyt metadanych.
+    """
+    data = get_vector_store()._collection.get(include=["metadatas"])
+    counts: dict[str, int] = {}
+    for meta in data["metadatas"]:
+        counts[meta["document_id"]] = counts.get(meta["document_id"], 0) + 1
+    return DocumentsResponse(
+        documents=[
+            DocumentInfo(document_id=doc_id, chunks=n)
+            for doc_id, n in sorted(counts.items())
+        ],
+        total_chunks=len(data["ids"]),
+    )
+
+
 @app.get("/debug/retrieve")
 def debug_retrieve(q: str, k: int | None = None) -> RetrieveResponse:
     """Sam retrieval, ZERO wywołań LLM — do testowania wyszukiwania przed generacją.
@@ -486,6 +669,7 @@ def ask(body: AskRequest) -> AskResponse:
     model = body.model or DEFAULT_MODEL
     last_error: str | None = None
     attempts: list[AttemptResult] = []
+    rachunek = ""  # wypełniane tylko na ścieżce reasoned (schemat AnswerReasoned*)
     total_tokens_used = 0
     total_prompt_tokens = 0
     total_completion_tokens = 0
@@ -530,8 +714,8 @@ def ask(body: AskRequest) -> AskResponse:
                     )
                 )
             else:
-                answer, tokens_used, prompt_tokens, completion_tokens = call_structured_model(
-                    body.question, model, context, body.language
+                answer, rachunek, tokens_used, prompt_tokens, completion_tokens = call_structured_model(
+                    body.question, model, context, body.language, body.reasoned
                 )
                 total_tokens_used += tokens_used
                 total_prompt_tokens += prompt_tokens
@@ -551,24 +735,27 @@ def ask(body: AskRequest) -> AskResponse:
             )
             # Week 4: trwały trace przebiegu (litera T) — pełny pobrany kontekst,
             # wyjście i metadane; /ask nie ma narzędzi, więc tool_calls puste.
-            save_trace(
-                {
-                    "engine": "ask",
-                    "user_input": body.question,
-                    "model": model,
-                    "prompt_version": PROMPT_VERSION if body.language == "pl" else PROMPT_VERSION_EN,
-                    "tool_calls": [],
-                    "retrieved_context": [context],
-                    "retrieved_chunks": retrieved_chunks,
-                    "assistant_output": answer.model_dump(),
-                    "sources": answer.source,
-                    "refused": answer.i_dont_know,
-                    "tokens": total_tokens_used,
-                    "cost_usd": round(cost_usd, 6),
-                    "latency_ms": latency_ms,
-                    "attempts": [a.model_dump() for a in attempts],
-                }
-            )
+            trace_record = {
+                "engine": "ask",
+                "user_input": body.question,
+                "model": model,
+                "prompt_version": prompt_version_for(body.language, body.reasoned),
+                "tool_calls": [],
+                "retrieved_context": [context],
+                "retrieved_chunks": retrieved_chunks,
+                "assistant_output": answer.model_dump(),
+                "sources": answer.source,
+                "refused": answer.i_dont_know,
+                "tokens": total_tokens_used,
+                "cost_usd": round(cost_usd, 6),
+                "latency_ms": latency_ms,
+                "attempts": [a.model_dump() for a in attempts],
+            }
+            # Klucze TYLKO na ścieżce reasoned — rekordy domyślne bajt w bajt jak dotąd.
+            if body.reasoned:
+                trace_record["reasoned"] = True
+                trace_record["rachunek"] = rachunek
+            save_trace(trace_record)
             return AskResponse(
                 answer=answer,
                 tokens_used=total_tokens_used,

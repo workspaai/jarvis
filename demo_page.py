@@ -51,6 +51,7 @@ UI_TEXTS = {
         "question_placeholder": "Zadaj pytanie o zaindeksowane dokumenty…",
         "model_label": "Model",
         "force_bad_label": "Wymuś zepsutą pierwszą odpowiedź (demo walidacji + retry z Week 1)",
+        "reasoned_label": "Rachunek przed werdyktem (naprawa błędnych porównań z liczbami)",
         "ask_button": "Zapytaj",
         "ask_spinner": "Wołam /ask… (uśpiony Render może się budzić do ~1 min)",
         "full_json": "Pełny JSON odpowiedzi",
@@ -60,6 +61,10 @@ UI_TEXTS = {
         "sources_none": "**Źródła (cytowane):** _brak — odpowiedź nie cytuje żadnego dokumentu_",
         "chunks_prefix": "**Pobrane chunki (retrieval):** ",
         "ingest_caption": "Demo publiczne — guardrail przy ingeście jest w backlogu (Week 3).",
+        "docs_header": "📚 Dokumenty w bazie (inwentarz z metadanych — bez LLM i bez retrievalu)",
+        "docs_refresh": "Odśwież listę dokumentów",
+        "docs_empty": "Baza jest pusta — wgraj pierwszy dokument poniżej.",
+        "docs_total": "Razem: **{docs}** dokument(ów), **{chunks}** chunk(ów).",
         "upload_header": "### Wgraj plik",
         "upload_caption": (
             "Parsowanie dzieje się tutaj, w Streamlicie — do API leci już czysty "
@@ -98,6 +103,7 @@ UI_TEXTS = {
         "question_placeholder": "Ask about the indexed documents…",
         "model_label": "Model",
         "force_bad_label": "Force a broken first answer (validation + retry demo from Week 1)",
+        "reasoned_label": "Calculation before verdict (numeric-comparison bias fix)",
         "ask_button": "Ask",
         "ask_spinner": "Calling /ask… (a sleeping Render instance may take up to ~1 min)",
         "full_json": "Full JSON response",
@@ -107,6 +113,10 @@ UI_TEXTS = {
         "sources_none": "**Sources (cited):** _none — the answer cites no document_",
         "chunks_prefix": "**Retrieved chunks:** ",
         "ingest_caption": "Public demo — an ingest guardrail is in the backlog (Week 3).",
+        "docs_header": "📚 Documents in the index (metadata inventory — no LLM, no retrieval)",
+        "docs_refresh": "Refresh document list",
+        "docs_empty": "The index is empty — upload your first document below.",
+        "docs_total": "Total: **{docs}** document(s), **{chunks}** chunk(s).",
         "upload_header": "### Upload a file",
         "upload_caption": (
             "Parsing happens right here, in Streamlit — the API receives plain "
@@ -130,12 +140,15 @@ UI_TEXTS = {
 }
 
 
-def build_payload(question: str, model: str, force_bad: bool, language: str) -> dict:
+def build_payload(
+    question: str, model: str, force_bad: bool, language: str, reasoned: bool
+) -> dict:
     return {
         "question": question,
         "model": model,
         "force_bad": force_bad,
         "language": language,
+        "reasoned": reasoned,
     }
 
 
@@ -466,9 +479,12 @@ with tab_ask:
         )
         model = st.selectbox(T["model_label"], MODELS, index=0)
         force_bad = st.checkbox(T["force_bad_label"], value=False)
+        # Domyślnie WŁĄCZONE w UI (naprawa Q3); API bez flagi zostaje przy starej
+        # ścieżce, więc evale i dotychczasowe klienty są nietknięte.
+        reasoned = st.checkbox(T["reasoned_label"], value=True)
         submitted = st.form_submit_button(T["ask_button"], type="primary")
 
-    payload = build_payload(question, model, force_bad, LANG)
+    payload = build_payload(question, model, force_bad, LANG, reasoned)
     st.markdown("#### Request")
     st.code(render_curl(base_url, payload), language="bash")
 
@@ -483,6 +499,26 @@ with tab_ask:
 
 with tab_ingest:
     st.caption(T["ingest_caption"])
+
+    # Inwentarz z metadanych (GET /documents) — odpowiedź na klasę „wymień
+    # wszystkie", której retrieval semantyczny nie pokrywa (odkrycie W5/W6).
+    with st.expander(T["docs_header"]):
+        if st.button(T["docs_refresh"], key="docs_refresh_btn"):
+            status, data = call_json("GET", f"{base_url.rstrip('/')}/documents")
+            if status == 200 and isinstance(data, dict):
+                if data.get("documents"):
+                    for doc in data["documents"]:
+                        st.markdown(f"- **{doc['document_id']}** — {doc['chunks']} chunk(ów)")
+                    st.caption(
+                        T["docs_total"].format(
+                            docs=len(data["documents"]), chunks=data.get("total_chunks", 0)
+                        )
+                    )
+                else:
+                    st.info(T["docs_empty"])
+            else:
+                st.markdown(f"**HTTP {status}**" if status else "**Request failed**")
+                st.json(data)
 
     st.markdown(T["upload_header"])
     st.caption(
