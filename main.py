@@ -153,9 +153,9 @@ _REASONED_RULE_PL = (
 )
 _REASONED_RULE_EN = (
     "\n7. Whenever the question involves numbers, thresholds, limits or finding "
-    "the largest/smallest value: FIRST fill the `rachunek` field — list all "
+    "the largest/smallest value: FIRST fill the `calculation` field — list all "
     "relevant values with their labels and the step-by-step work — and the "
-    "verdict in `answer` must follow directly from that work. Leave `rachunek` "
+    "verdict in `answer` must follow directly from that work. Leave `calculation` "
     "empty only for questions with no numbers at all."
 )
 SYSTEM_PROMPT_REASONED = SYSTEM_PROMPT + _REASONED_RULE_PL
@@ -313,9 +313,15 @@ class AnswerReasoned(BaseModel):
 
 
 class AnswerReasonedEN(BaseModel):
-    """English twin of AnswerReasoned — same field ORDER, English wording."""
+    """English twin of AnswerReasoned — same field ORDER, English wording.
 
-    rachunek: str = Field(
+    Pole nazywa się `calculation`, nie `rachunek`: pomiar na żywo (2.09) pokazał,
+    że przy angielskiej generacji polska nazwa pola jest ignorowana (EN×reasoned
+    0/3, delta tokenów potwierdzała aktywną ścieżkę) — obcy token w schemacie
+    nie działał jako instrukcja.
+    """
+
+    calculation: str = Field(
         description=(
             "MANDATORY whenever numbers appear in the question or the answer. Write "
             "the step-by-step work HERE before formulating the answer: for thresholds/"
@@ -531,7 +537,7 @@ def call_structured_model(
         raise ValueError("Model returned no parseable structured output")
 
     total_tokens, prompt_tokens, completion_tokens = usage_counts(completion)
-    rachunek = getattr(parsed, "rachunek", "") or ""
+    rachunek = getattr(parsed, "rachunek", "") or getattr(parsed, "calculation", "") or ""
     if not isinstance(parsed, Answer):
         # Warianty (EN/Reasoned*) mają te same pola odpowiedzi — klient API dostaje
         # jeden kształt; `rachunek` wraca osobno (trafia do trace'u, nie do API).
