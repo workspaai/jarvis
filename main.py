@@ -5,6 +5,7 @@ Run:
 """
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import Literal
@@ -414,6 +415,41 @@ class DocumentsResponse(BaseModel):
     total_chunks: int
 
 
+# Pytania INWENTARZOWE („wymień wszystkie", „jakie przedmioty") — zmierzone
+# (W5/W6): retrieval semantyczny ich nie pokrywa. Zamiast liczyć na podobieństwo,
+# /ask dokleja do odpowiedzi PRAWDZIWĄ listę z metadanych (ta sama agregacja,
+# co GET /documents). Wzorzec celowo CIASNY — test w evals pilnuje, żeby żadne
+# pytanie golden setu go nie łapało.
+_INVENTORY_PATTERN = re.compile(
+    r"jakie (dokumenty|przedmioty|kursy|sylabusy)"
+    r"|wymie[nń].{0,24}(dokument|przedmiot|kurs|sylabus)"
+    r"|wypisz wszystk"
+    r"|co (jest|masz|mamy) w bazie"
+    r"|ile (dokument[oó]w|kurs[oó]w|przedmiot[oó]w) (jest|masz|mamy)"
+    r"|(what|which) (documents|courses|subjects) (do you have|are (there|in))"
+    r"|list (all|my|the).{0,12}(documents|courses|subjects)",
+    re.IGNORECASE,
+)
+
+
+def inventory_hint(language: AnswerLanguage) -> str:
+    """Dopisek z pełnym inwentarzem bazy (metadane, zero LLM)."""
+    data = get_vector_store()._collection.get(include=["metadatas"])
+    ids = sorted({meta["document_id"] for meta in data["metadatas"]})
+    if not ids:
+        return ""
+    listing = ", ".join(ids)
+    if language == "pl":
+        return (
+            f"\n\n\U0001F4DA Pełny inwentarz bazy ({len(ids)} dokument(ów)): {listing}. "
+            "Lista na żywo: zakładka „Dodaj dokument” → „Dokumenty w bazie”."
+        )
+    return (
+        f"\n\n\U0001F4DA Full index inventory ({len(ids)} document(s)): {listing}. "
+        "Live list: “Add a document” tab → “Documents in the index”."
+    )
+
+
 class RetrieveHit(BaseModel):
     document_id: str
     chunk_index: int
@@ -752,6 +788,11 @@ def ask(body: AskRequest) -> AskResponse:
             cost_usd = compute_cost_usd(
                 model, total_prompt_tokens, total_completion_tokens
             )
+            # Pytanie inwentarzowe → doklej prawdziwą listę z metadanych (nawet do
+            # odmowy: uczciwe „nie wiem" + kompletna lista to najlepsza para).
+            if _INVENTORY_PATTERN.search(body.question):
+                answer.answer = answer.answer + inventory_hint(body.language)
+
             # Week 4: trwały trace przebiegu (litera T) — pełny pobrany kontekst,
             # wyjście i metadane; /ask nie ma narzędzi, więc tool_calls puste.
             trace_record = {
