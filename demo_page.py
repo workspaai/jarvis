@@ -232,17 +232,109 @@ def _extract_docx(raw: bytes) -> str:
     return "\n".join(parts)
 
 
+def _format_cell(value) -> str:
+    if isinstance(value, float) and value == int(value):
+        return str(int(value))
+    return str(value).strip()
+
+
 def _extract_xlsx(raw: bytes) -> str:
+    """Parser per-wartość: KAŻDA komórka niesie własną nazwę kolumny.
+
+    Naprawa „zapadania kolumn" (odkrycie 3.09, arkusz marż): stary format
+    „a | b | c" pomijał puste komórki, więc pozycja w tekście przestawała
+    odpowiadać kolumnie arkusza i mapowanie nazwa↔wartość ginęło BEZPOWROTNIE
+    (sprawa 497). Tu pomijanie pustych jest bezpieczne, bo etykieta jedzie
+    razem z wartością. Nagłówki grupowe czytamy z DOKŁADNYCH zakresów scaleń
+    (nie zgadujemy forward-fillem); podetykiety metryk (wiersz 2) doklejamy
+    tylko do wierszy macierzy (pierwsza komórka liczbowa) — wiersze sekcyjne
+    dostają samą grupę, bez mylących metryk.
+    """
     from openpyxl import load_workbook
 
-    workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    # Bez read_only: potrzebujemy merged_cells.ranges (pliki są małe).
+    workbook = load_workbook(io.BytesIO(raw), data_only=True)
     parts = []
     for sheet in workbook.worksheets:
         parts.append(f"[Arkusz: {sheet.title}]")
-        for row in sheet.iter_rows(values_only=True):
-            cells = [str(value).strip() for value in row if value is not None]
-            if cells:
-                parts.append(" | ".join(cells))
+        max_col = sheet.max_column
+
+        # Nagłówki grupowe (wiersz 1) rozciągnięte na dokładne zakresy scaleń.
+        groups = [""] * (max_col + 1)
+        for col in range(1, max_col + 1):
+            value = sheet.cell(1, col).value
+            if isinstance(value, str) and value.strip():
+                groups[col] = value.strip()
+        has_group_merges = False
+        for merged in sheet.merged_cells.ranges:
+            if merged.min_row <= 1 <= merged.max_row:
+                if merged.max_col > merged.min_col:
+                    has_group_merges = True
+                label = sheet.cell(merged.min_row, merged.min_col).value
+                if isinstance(label, str) and label.strip():
+                    for col in range(merged.min_col, min(merged.max_col, max_col) + 1):
+                        groups[col] = label.strip()
+        # Forward-fill od kotwic: kolumna należy do ostatniego nagłówka grupy
+        # na lewo (grupy bywają szersze niż ich scalenie — zgodne z pozycjami
+        # komórek w oryginale, zweryfikowane openpyxl przy sprawie 497).
+        for col in range(2, max_col + 1):
+            if not groups[col]:
+                groups[col] = groups[col - 1]
+
+        # Wiersz 2 = podetykiety metryk TYLKO przy scalonych nagłówkach
+        # grupowych w wierszu 1 (sygnał układu dwupoziomowego). Bez tego
+        # tekstowe wiersze danych (np. „Stawka VAT | 23%") wyglądałyby jak
+        # nagłówek i znikały.
+        row2 = [sheet.cell(2, col).value for col in range(1, max_col + 1)]
+        row2_nonempty = [v for v in row2 if v is not None and str(v).strip()]
+        row2_is_header = has_group_merges and bool(row2_nonempty) and (
+            sum(isinstance(v, str) for v in row2_nonempty) / len(row2_nonempty) > 0.5
+        )
+        subs = [""] * (max_col + 1)
+        first_data_row = 2
+        if row2_is_header:
+            first_data_row = 3
+            for col in range(1, max_col + 1):
+                value = row2[col - 1]
+                if isinstance(value, str) and value.strip():
+                    subs[col] = value.strip()
+
+        def column_label(col: int, with_sub: bool) -> str:
+            group, sub = groups[col], subs[col]
+            if with_sub and group and sub:
+                return f"{group} / {sub}"
+            return group or sub or f"kolumna {col}"
+
+        for row_idx in range(first_data_row, sheet.max_row + 1):
+            cells = [
+                (col, sheet.cell(row_idx, col).value)
+                for col in range(1, max_col + 1)
+            ]
+            nonempty = [
+                (col, value)
+                for col, value in cells
+                if value is not None and str(value).strip() != ""
+            ]
+            if not nonempty:
+                continue
+            # Etykieta wiersza: pierwsza TEKSTOWA komórka z dwóch pierwszych
+            # niepustych; inaczej pierwsza wartość (np. numer tygodnia).
+            label_col, label = nonempty[0]
+            for col, value in nonempty[:2]:
+                if isinstance(value, str):
+                    label_col, label = col, value
+                    break
+            # Podetykiety metryk tylko dla wierszy macierzy (start liczbowy).
+            matrix_row = not isinstance(nonempty[0][1], str)
+            pairs = [
+                f"{column_label(col, matrix_row)}: {_format_cell(value)}"
+                for col, value in nonempty
+                if col != label_col
+            ]
+            row_text = f"WIERSZ {_format_cell(label)}"
+            if pairs:
+                row_text += " → " + "; ".join(pairs)
+            parts.append(row_text)
     workbook.close()
     return "\n".join(parts)
 
